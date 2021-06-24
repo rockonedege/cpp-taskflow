@@ -13,10 +13,10 @@ int main(int argc, char* argv[]) {
   size_t N = std::atoi(argv[1]);
 
   auto data = tf::cuda_malloc_shared<int>(N);
-  auto res1 = tf::cuda_malloc_shared<int>(N);
-  auto res2 = tf::cuda_malloc_shared<int>(N);
+  auto res1 = tf::cuda_malloc_shared<int>(1);
+  auto res2 = tf::cuda_malloc_shared<int>(1);
   auto hres = 0;
-  
+
   // initialize the data
   for(size_t i=0; i<N; i++) {
     data[i] = ::rand()%100;

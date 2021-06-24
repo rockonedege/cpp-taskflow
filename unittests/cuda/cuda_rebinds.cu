@@ -97,14 +97,14 @@ void rebind_kernel() {
 
       cf.offload();
 
-      cf.rebind_kernel(
+      cf.kernel(
         multi_t,
         64, 128, 0,
         multiply<T>,
         operand[ind[2]], operand[ind[0]], operand[ind[1]], N
       );
 
-      cf.rebind_kernel(
+      cf.kernel(
         add_t,
         16, 256, 0,
         add<T>,
@@ -113,14 +113,14 @@ void rebind_kernel() {
 
       cf.offload();
 
-      cf.rebind_kernel(
+      cf.kernel(
         multi_t,
         8, 1024, 0,
         multiply<T>,
         operand[ind[0]], operand[ind[2]], operand[ind[1]], N
       );
 
-      cf.rebind_kernel(
+      cf.kernel(
         add_t,
         64, 64, 0,
         add<T>,
@@ -132,40 +132,76 @@ void rebind_kernel() {
 
     //verify
     auto verify_t = taskflow.emplace([&](tf::cudaFlowCapturer& cf) {
+      //auto multi1_t = cf.transform(
+      //  ans_operand[ind[2]],  ans_operand[ind[2]]+ N,
+      //  [] __device__ (T& v1, T& v2) { return v1 * v2; },
+      //  ans_operand[ind[0]], ans_operand[ind[1]]
+      //);
+
       auto multi1_t = cf.transform(
-        ans_operand[ind[2]],  ans_operand[ind[2]]+ N,
-        [] __device__ (T& v1, T& v2) { return v1 * v2; },
-        ans_operand[ind[0]], ans_operand[ind[1]]
+        ans_operand[ind[0]], ans_operand[ind[0]] + N, ans_operand[ind[1]],
+        ans_operand[ind[2]],
+        [] __device__ (T& v1, T& v2) { return v1*v2; }
       );
+
+      //auto add1_t = cf.transform(
+      //  ans_operand[ind[0]],  ans_operand[ind[0]]+ N,
+      //  [] __device__ (T& v1, T& v2) { return v1 + v2; },
+      //  ans_operand[ind[1]], ans_operand[ind[2]]
+      //);
 
       auto add1_t = cf.transform(
-        ans_operand[ind[0]],  ans_operand[ind[0]]+ N,
-        [] __device__ (T& v1, T& v2) { return v1 + v2; },
-        ans_operand[ind[1]], ans_operand[ind[2]]
+        ans_operand[ind[1]], ans_operand[ind[1]]+N, ans_operand[ind[2]],
+        ans_operand[ind[0]],
+        [] __device__ (T& v1, T& v2) { return v1 + v2; }
       );
 
+      //auto multi2_t = cf.transform(
+      //  ans_operand[ind[1]],  ans_operand[ind[1]]+ N,
+      //  [] __device__ (T& v1, T& v2) { return v1 * v2; },
+      //  ans_operand[ind[2]], ans_operand[ind[0]]
+      //);
+      
       auto multi2_t = cf.transform(
-        ans_operand[ind[1]],  ans_operand[ind[1]]+ N,
-        [] __device__ (T& v1, T& v2) { return v1 * v2; },
-        ans_operand[ind[2]], ans_operand[ind[0]]
+        ans_operand[ind[2]], ans_operand[ind[2]] + N, ans_operand[ind[0]],
+        ans_operand[ind[1]],
+        [] __device__ (T& v1, T& v2) { return v1 * v2; }
       );
 
+      //auto add2_t = cf.transform(
+      //  ans_operand[ind[2]],  ans_operand[ind[2]]+ N,
+      //  [] __device__ (T& v1, T& v2) { return v1 + v2; },
+      //  ans_operand[ind[1]], ans_operand[ind[0]]
+      //);
+      
       auto add2_t = cf.transform(
-        ans_operand[ind[2]],  ans_operand[ind[2]]+ N,
-        [] __device__ (T& v1, T& v2) { return v1 + v2; },
-        ans_operand[ind[1]], ans_operand[ind[0]]
+        ans_operand[ind[1]], ans_operand[ind[1]] + N, ans_operand[ind[0]],
+        ans_operand[ind[2]],
+        [] __device__ (T& v1, T& v2) { return v1 + v2; }
       );
 
+      //auto multi3_t = cf.transform(
+      //  ans_operand[ind[1]],  ans_operand[ind[1]]+ N,
+      //  [] __device__ (T& v1, T& v2) { return v1 * v2; },
+      //  ans_operand[ind[0]], ans_operand[ind[2]]
+      //);
+      
       auto multi3_t = cf.transform(
-        ans_operand[ind[1]],  ans_operand[ind[1]]+ N,
-        [] __device__ (T& v1, T& v2) { return v1 * v2; },
-        ans_operand[ind[0]], ans_operand[ind[2]]
+        ans_operand[ind[0]], ans_operand[ind[0]] + N,  ans_operand[ind[2]],
+        ans_operand[ind[1]],
+        [] __device__ (T& v1, T& v2) { return v1 * v2; }
       );
 
+      //auto add3_t = cf.transform(
+      //  ans_operand[ind[0]],  ans_operand[ind[0]]+ N,
+      //  [] __device__ (T& v1, T& v2) { return v1 + v2; },
+      //  ans_operand[ind[2]], ans_operand[ind[1]]
+      //);
+      
       auto add3_t = cf.transform(
-        ans_operand[ind[0]],  ans_operand[ind[0]]+ N,
-        [] __device__ (T& v1, T& v2) { return v1 + v2; },
-        ans_operand[ind[2]], ans_operand[ind[1]]
+        ans_operand[ind[2]], ans_operand[ind[2]] + N, ans_operand[ind[1]],
+        ans_operand[ind[0]],
+        [] __device__ (T& v1, T& v2) { return v1 + v2; }
       );
   
       auto verify1_t = cf.kernel(
@@ -266,25 +302,37 @@ void rebind_copy() {
       auto h2d_t = cf.copy(da, ha.data(), N).name("h2d");
       cf.offload();
 
-      cf.rebind_copy(h2d_t, db, hb.data(), N);
+      cf.copy(h2d_t, db, hb.data(), N);
       cf.offload();
 
-      cf.rebind_copy(h2d_t, dc, hc.data(), N);
+      cf.copy(h2d_t, dc, hc.data(), N);
       cf.offload();
 
     });
 
     auto kernel_t = taskflow.emplace([&](tf::cudaFlowCapturer& cf) {
+      //auto add1_t = cf.transform(
+      //  dz,  dz + N,
+      //  [] __device__ (T& v1, T& v2) { return v1 + v2; },
+      //  da, db
+      //);
+      
       auto add1_t = cf.transform(
-        dz,  dz + N,
-        [] __device__ (T& v1, T& v2) { return v1 + v2; },
-        da, db
+        da, da+N, db,
+        dz,
+        [] __device__ (T& v1, T& v2) { return v1 + v2; }
       );
 
+      //auto add2_t = cf.transform(
+      //  dc,  dc + N,
+      //  [] __device__ (T& v1, T& v2) { return v1 - v2; },
+      //  dc, dz
+      //);
+      
       auto add2_t = cf.transform(
-        dc,  dc + N,
-        [] __device__ (T& v1, T& v2) { return v1 - v2; },
-        dc, dz
+        dc, dc + N, dz,
+        dc,
+        [] __device__ (T& v1, T& v2) { return v1 - v2; }
       );
 
       add1_t.precede(add2_t);
@@ -294,7 +342,7 @@ void rebind_copy() {
       auto d2h_t = cf.copy(hc.data(), dc, N).name("d2h");
       cf.offload();
 
-      cf.rebind_copy(d2h_t, hz.data(), dz, N);
+      cf.copy(d2h_t, hz.data(), dz, N);
       cf.offload();
 
     });
@@ -377,25 +425,37 @@ void rebind_memcpy() {
       auto h2d_t = cf.memcpy(da, ha.data(), sizeof(T) * N).name("h2d");
       cf.offload();
 
-      cf.rebind_memcpy(h2d_t, db, hb.data(), sizeof(T) * N);
+      cf.memcpy(h2d_t, db, hb.data(), sizeof(T) * N);
       cf.offload();
 
-      cf.rebind_memcpy(h2d_t, dc, hc.data(), sizeof(T) * N);
+      cf.memcpy(h2d_t, dc, hc.data(), sizeof(T) * N);
       cf.offload();
 
     });
 
     auto kernel_t = taskflow.emplace([&](tf::cudaFlowCapturer& cf) {
+      //auto add1_t = cf.transform(
+      //  dz,  dz + N,
+      //  [] __device__ (T& v1, T& v2) { return v1 + v2; },
+      //  da, db
+      //);
+      
       auto add1_t = cf.transform(
-        dz,  dz + N,
-        [] __device__ (T& v1, T& v2) { return v1 + v2; },
-        da, db
+        da, da + N, db,
+        dz,
+        [] __device__ (T& v1, T& v2) { return v1 + v2; }
       );
 
+      //auto add2_t = cf.transform(
+      //  dc,  dc + N,
+      //  [] __device__ (T& v1, T& v2) { return v1 - v2; },
+      //  dc, dz
+      //);
+      
       auto add2_t = cf.transform(
-        dc,  dc + N,
-        [] __device__ (T& v1, T& v2) { return v1 - v2; },
-        dc, dz
+        dc, dc + N, dz,
+        dc,
+        [] __device__ (T& v1, T& v2) { return v1 - v2; }
       );
 
       add1_t.precede(add2_t);
@@ -405,7 +465,7 @@ void rebind_memcpy() {
       auto d2h_t = cf.memcpy(hc.data(), dc, sizeof(T) * N).name("d2h");
       cf.offload();
 
-      cf.rebind_memcpy(d2h_t, hz.data(), dz, sizeof(T) * N);
+      cf.memcpy(d2h_t, hz.data(), dz, sizeof(T) * N);
       cf.offload();
 
     });
@@ -452,17 +512,18 @@ TEST_CASE("cudaFlowCapturer.rebind.memcpy.double" * doctest::timeout(300)) {
   rebind_memcpy<double>();
 }
 
-
-
 //----------------------------------------------------------------------
 //rebind memset
 //----------------------------------------------------------------------
 template <typename T>
 void rebind_memset() {
+
   tf::Executor executor;
+  tf::Taskflow taskflow;
 
   for(size_t N = 1; N < 65199; N = N * 2 + 1) {
-    tf::Taskflow taskflow;
+
+    taskflow.clear();
 
     T* a {nullptr};
     T* b {nullptr};
@@ -499,10 +560,10 @@ void rebind_memset() {
       auto memset_t = cf.memset(ans_a, 0, N * sizeof(T));
       cf.offload();
 
-      cf.rebind_memset(memset_t, a, 0, N * sizeof(T));
+      cf.memset(memset_t, a, 0, N * sizeof(T));
       cf.offload();
 
-      cf.rebind_memset(memset_t, b, 1, (N + 37) * sizeof(T));
+      cf.memset(memset_t, b, 1, (N + 37) * sizeof(T));
       cf.offload();
     }).name("memset");
 
@@ -579,7 +640,7 @@ TEST_CASE("cudaFlowCapturer.rebind.algorithms") {
   REQUIRE(capturer.num_tasks() == 1);
   
   // rebind to single task
-  capturer.rebind_single_task(task, [=] __device__ () {*data = 2;});
+  capturer.single_task(task, [=] __device__ () {*data = 2;});
 
   capturer.offload();
   
@@ -590,7 +651,7 @@ TEST_CASE("cudaFlowCapturer.rebind.algorithms") {
   REQUIRE(capturer.num_tasks() == 1);
   
   // rebind to for each index
-  capturer.rebind_for_each_index(task, 0, 10000, 1,
+  capturer.for_each_index(task, 0, 10000, 1,
     [=] __device__ (int i) {
       data[i] = -23;
     }
@@ -605,7 +666,7 @@ TEST_CASE("cudaFlowCapturer.rebind.algorithms") {
 
   // rebind to reduce
   *res = 10;
-  capturer.rebind_reduce(task, data, data + 10000, res, 
+  capturer.reduce(task, data, data + 10000, res, 
     []__device__(int a, int b){ return a + b; }
   );
 
@@ -615,7 +676,7 @@ TEST_CASE("cudaFlowCapturer.rebind.algorithms") {
   REQUIRE(capturer.num_tasks() == 1);
   
   // rebind to uninitialized reduce
-  capturer.rebind_uninitialized_reduce(task, data, data + 10000, res, 
+  capturer.uninitialized_reduce(task, data, data + 10000, res, 
     []__device__(int a, int b){ return a + b; }
   );
 
@@ -625,7 +686,7 @@ TEST_CASE("cudaFlowCapturer.rebind.algorithms") {
   REQUIRE(capturer.num_tasks() == 1);
   
   // rebind to single task
-  capturer.rebind_single_task(task, [res]__device__(){ *res = 999; });
+  capturer.single_task(task, [res]__device__(){ *res = 999; });
   REQUIRE(*res == -230000);
 
   capturer.offload();
@@ -646,12 +707,3 @@ TEST_CASE("cudaFlowCapturer.rebind.algorithms") {
   tf::cuda_free(data);
   tf::cuda_free(res);
 }
-
-
-
-
-
-
-
-
-

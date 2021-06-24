@@ -9,8 +9,12 @@ list(APPEND TF_CUDA_EXAMPLES
   cuda_knn
   cuda_capturer
   cuda_reduce
+  cuda_scan
+  cuda_merge
+  cuda_sort
   cuda_transform
   cuda_rebind
+  cuda_find
 )
 
 foreach(cuda_example IN LISTS TF_CUDA_EXAMPLES)
@@ -25,12 +29,4 @@ foreach(cuda_example IN LISTS TF_CUDA_EXAMPLES)
     set_property(TARGET ${cuda_example} PROPERTY CUDA_ARCHITECTURES OFF)
   endif()
 endforeach()
-
-# -----------------------------------------------------------------------------
-# CUDA BLAS examples
-# -----------------------------------------------------------------------------
-
-if(CUBLAS_FOUND)
-add_subdirectory(cublas)
-endif()
 

@@ -27,12 +27,11 @@ class Executor {
 
   friend class FlowBuilder;
   friend class Subflow;
-  friend class cudaFlow;
 
-  struct PerThread {
-    Worker* worker;
-    inline PerThread() : worker {nullptr} { }
-  };
+  //struct PerThread {
+  //  Worker* worker;
+  //  inline PerThread() : worker {nullptr} { }
+  //};
 
   public:
 
@@ -47,71 +46,147 @@ class Executor {
     ~Executor();
 
     /**
-    @brief runs the taskflow once
+    @brief runs a taskflow once
     
     @param taskflow a tf::Taskflow object
 
-    @return a tf::Future that will holds the result of the execution
+    @return a tf::Future that holds the result of the execution
     */
     tf::Future<void> run(Taskflow& taskflow);
+    
+    /**
+    @brief runs a moved taskflow once
+    
+    @param taskflow a moved tf::Taskflow object
+
+    @return a tf::Future that holds the result of the execution
+
+    The executor will take care of the lifetime of the moved taskflow.
+    */
+    tf::Future<void> run(Taskflow&& taskflow);
 
     /**
-    @brief runs the taskflow once and invoke a callback upon completion
+    @brief runs a taskflow once and invoke a callback upon completion
 
     @param taskflow a tf::Taskflow object 
     @param callable a callable object to be invoked after this run
 
-    @return a tf::Future that will holds the result of the execution
+    @return a tf::Future that holds the result of the execution
     */
     template<typename C>
     tf::Future<void> run(Taskflow& taskflow, C&& callable);
+    
+    /**
+    @brief runs a moved taskflow once and invoke a callback upon completion
+
+    @param taskflow a moved tf::Taskflow object 
+    @param callable a callable object to be invoked after this run
+
+    @return a tf::Future that holds the result of the execution
+
+    The executor will take care of the lifetime of the moved taskflow.
+    */
+    template<typename C>
+    tf::Future<void> run(Taskflow&& taskflow, C&& callable);
 
     /**
-    @brief runs the taskflow for N times
+    @brief runs a taskflow for @c N times
     
     @param taskflow a tf::Taskflow object
     @param N number of runs
 
-    @return a tf::Future that will holds the result of the execution
+    @return a tf::Future that holds the result of the execution
     */
     tf::Future<void> run_n(Taskflow& taskflow, size_t N);
+    
+    /**
+    @brief runs a moved taskflow for @c N times
+    
+    @param taskflow a moved tf::Taskflow object
+    @param N number of runs
+
+    @return a tf::Future that holds the result of the execution
+
+    The executor will take care of the lifetime of the moved taskflow.
+    */
+    tf::Future<void> run_n(Taskflow&& taskflow, size_t N);
 
     /**
-    @brief runs the taskflow for N times and then invokes a callback
+    @brief runs a taskflow for @c N times and then invokes a callback
 
     @param taskflow a tf::Taskflow 
     @param N number of runs
     @param callable a callable object to be invoked after this run
 
-    @return a tf::Future that will holds the result of the execution
+    @return a tf::Future that holds the result of the execution
     */
     template<typename C>
     tf::Future<void> run_n(Taskflow& taskflow, size_t N, C&& callable);
+    
+    /**
+    @brief runs a moved taskflow for @c N times and then invokes a callback
+
+    @param taskflow a moved tf::Taskflow 
+    @param N number of runs
+    @param callable a callable object to be invoked after this run
+
+    @return a tf::Future that holds the result of the execution
+    */
+    template<typename C>
+    tf::Future<void> run_n(Taskflow&& taskflow, size_t N, C&& callable);
 
     /**
-    @brief runs the taskflow multiple times until the predicate becomes true and 
-           then invokes a callback
+    @brief runs a taskflow multiple times until the predicate becomes true
 
     @param taskflow a tf::Taskflow 
     @param pred a boolean predicate to return true for stop
 
-    @return a tf::Future that will holds the result of the execution
+    @return a tf::Future that holds the result of the execution
     */
     template<typename P>
     tf::Future<void> run_until(Taskflow& taskflow, P&& pred);
+    
+    /**
+    @brief runs a moved taskflow and keeps running it 
+           until the predicate becomes true
+
+    @param taskflow a moved tf::Taskflow object
+    @param pred a boolean predicate to return @c true for stop
+
+    @return a tf::Future that holds the result of the execution
+    
+    The executor will take care of the lifetime of a moved taskflow.
+    */
+    template<typename P>
+    tf::Future<void> run_until(Taskflow&& taskflow, P&& pred);
 
     /**
-    @brief runs the taskflow multiple times until the predicate becomes true and 
+    @brief runs a taskflow multiple times until the predicate becomes true and 
            then invokes the callback
 
     @param taskflow a tf::Taskflow 
-    @param pred a boolean predicate to return true for stop
-    @param callable a callable object to be invoked after this run
+    @param pred a boolean predicate to return @c true for stop
+    @param callable a callable object to be invoked after this run compltes
 
-    @return a tf::Future that will holds the result of the execution
+    @return a tf::Future that holds the result of the execution
     */
     template<typename P, typename C>
     tf::Future<void> run_until(Taskflow& taskflow, P&& pred, C&& callable);
+    
+    /**
+    @brief runs a moved taskflow and keeps running 
+           it until the predicate becomes true and then invokes the callback
+
+    @param taskflow a moved tf::Taskflow
+    @param pred a boolean predicate to return @c true for stop
+    @param callable a callable object to be invoked after this run completes
+
+    @return a tf::Future that holds the result of the execution
+
+    The executor will take care of the lifetime of a moved taskflow.
+    */
+    template<typename P, typename C>
+    tf::Future<void> run_until(Taskflow&& taskflow, P&& pred, C&& callable);
     
     /**
     @brief wait for all pending graphs to complete
@@ -130,6 +205,11 @@ class Executor {
     runtime metadata of the running taskflow.
     */
     size_t num_topologies() const;
+
+    /**
+    @brief queries the number of running taskflows with moved ownership
+    */
+    size_t num_taskflows() const;
 
     /**
     @brief queries the id of the caller thread in this executor
@@ -190,14 +270,11 @@ class Executor {
 
   private:
 
-    inline static thread_local PerThread _per_thread;
+    //inline static thread_local PerThread _per_thread;
+    //inline static thread_local Worker* _this_worker {nullptr};
 
-    const size_t _VICTIM_BEG;
-    const size_t _VICTIM_END;
-    const size_t _MAX_STEALS;
-    const size_t _MAX_YIELDS;
-   
     std::condition_variable _topology_cv;
+    std::mutex _taskflow_mutex;
     std::mutex _topology_mutex;
     std::mutex _wsq_mutex;
 
@@ -205,6 +282,7 @@ class Executor {
     
     std::vector<Worker> _workers;
     std::vector<std::thread> _threads;
+    std::list<Taskflow> _taskflows;
 
     Notifier _notifier;
 
@@ -258,10 +336,6 @@ class Executor {
 
 // Constructor
 inline Executor::Executor(size_t N) : 
-  _VICTIM_BEG {0},
-  _VICTIM_END {N - 1},
-  _MAX_STEALS {(N + 1) << 1},
-  _MAX_YIELDS {100},
   _workers    {N},
   _notifier   {N} {
   
@@ -304,6 +378,11 @@ inline size_t Executor::num_workers() const {
 // Function: num_topologies
 inline size_t Executor::num_topologies() const {
   return _num_topologies;
+}
+
+// Function: num_taskflows
+inline size_t Executor::num_taskflows() const {
+  return _taskflows.size();
 }
     
 // Function: async
@@ -361,7 +440,8 @@ void Executor::silent_async(F&& f, ArgsT&&... args) {
 
 // Function: this_worker_id
 inline int Executor::this_worker_id() const {
-  auto worker = _per_thread.worker;
+  //auto worker = _per_thread.worker;
+  Worker* worker = this_worker().worker;
   return worker ? static_cast<int>(worker->_id) : -1;
 }
 
@@ -376,7 +456,8 @@ inline void Executor::_spawn(size_t N) {
     
     _threads.emplace_back([this] (Worker& w) -> void {
 
-      _per_thread.worker = &w;
+      //_per_thread.worker = &w;
+      this_worker().worker = &w;
 
       Node* t = nullptr;
 
@@ -404,8 +485,9 @@ inline void Executor::_explore_task(Worker& w, Node*& t) {
 
   size_t num_steals = 0;
   size_t num_yields = 0;
+  size_t max_steals = ((_workers.size() + 1) << 1);
 
-  std::uniform_int_distribution<size_t> rdvtm(_VICTIM_BEG, _VICTIM_END);
+  std::uniform_int_distribution<size_t> rdvtm(0, _workers.size()-1);
 
   //while(!_done) {
   //
@@ -432,9 +514,9 @@ inline void Executor::_explore_task(Worker& w, Node*& t) {
       break;
     }
     
-    if(num_steals++ > _MAX_STEALS) {
+    if(num_steals++ > max_steals) {
       std::this_thread::yield();
-      if(num_yields++ > _MAX_YIELDS) {
+      if(num_yields++ > 100) {
         break;
       }
     }
@@ -575,7 +657,8 @@ inline void Executor::_schedule(Node* node) {
   //assert(_workers.size() != 0);
 
   // caller is a worker to this pool
-  auto worker = _per_thread.worker;
+  //auto worker = _per_thread.worker;
+  auto worker = this_worker().worker;
 
   if(worker != nullptr && worker->_executor == this) {
     worker->_wsq.push(node);
@@ -607,7 +690,8 @@ inline void Executor::_schedule(const std::vector<Node*>& nodes) {
   }
 
   // worker thread
-  auto worker = _per_thread.worker;
+  //auto worker = _per_thread.worker;
+  auto worker = this_worker().worker;
 
   if(worker != nullptr && worker->_executor == this) {
     for(size_t i=0; i<num_nodes; ++i) {
@@ -843,7 +927,8 @@ inline void Executor::_invoke_dynamic_task(Worker& w, Node* node) {
 // Procedure: _invoke_dynamic_task_external
 inline void Executor::_invoke_dynamic_task_external(Node*p, Graph& g, bool detach) {
 
-  auto worker = _per_thread.worker;
+  //auto worker = _per_thread.worker;
+  auto worker = this_worker().worker;
 
   assert(worker && worker->_executor == this);
   
@@ -884,7 +969,7 @@ inline void Executor::_invoke_dynamic_task_internal(
   if(detach) {    
     
     {
-      std::lock_guard<std::mutex> lock(p->_topology->_taskflow._mtx);
+      std::lock_guard<std::mutex> lock(p->_topology->_taskflow._mutex);
       p->_topology->_taskflow._graph.merge(std::move(g));
     }
 
@@ -897,7 +982,7 @@ inline void Executor::_invoke_dynamic_task_internal(
     _schedule(src);
     Node* t = nullptr;
   
-    std::uniform_int_distribution<size_t> rdvtm(_VICTIM_BEG, _VICTIM_END);
+    std::uniform_int_distribution<size_t> rdvtm(0, _workers.size()-1);
 
     while(p->_join_counter != 0) {
 
@@ -978,14 +1063,30 @@ inline tf::Future<void> Executor::run(Taskflow& f) {
 }
 
 // Function: run
+inline tf::Future<void> Executor::run(Taskflow&& f) {
+  return run_n(std::move(f), 1, [](){});
+}
+
+// Function: run
 template <typename C>
 tf::Future<void> Executor::run(Taskflow& f, C&& c) {
   return run_n(f, 1, std::forward<C>(c));
 }
 
+// Function: run
+template <typename C>
+tf::Future<void> Executor::run(Taskflow&& f, C&& c) {
+  return run_n(std::move(f), 1, std::forward<C>(c));
+}
+
 // Function: run_n
 inline tf::Future<void> Executor::run_n(Taskflow& f, size_t repeat) {
   return run_n(f, repeat, [](){});
+}
+
+// Function: run_n
+inline tf::Future<void> Executor::run_n(Taskflow&& f, size_t repeat) {
+  return run_n(std::move(f), repeat, [](){});
 }
 
 // Function: run_n
@@ -996,10 +1097,110 @@ tf::Future<void> Executor::run_n(Taskflow& f, size_t repeat, C&& c) {
   );
 }
 
+// Function: run_n
+template <typename C>
+tf::Future<void> Executor::run_n(Taskflow&& f, size_t repeat, C&& c) {
+  return run_until(
+    std::move(f), [repeat]() mutable { return repeat-- == 0; }, std::forward<C>(c)
+  );
+}
+
 // Function: run_until    
 template<typename P>
 tf::Future<void> Executor::run_until(Taskflow& f, P&& pred) {
   return run_until(f, std::forward<P>(pred), [](){});
+}
+
+// Function: run_until    
+template<typename P>
+tf::Future<void> Executor::run_until(Taskflow&& f, P&& pred) {
+  return run_until(std::move(f), std::forward<P>(pred), [](){});
+}
+
+// Function: run_until
+template <typename P, typename C>
+tf::Future<void> Executor::run_until(Taskflow& f, P&& pred, C&& c) {
+
+  _increment_topology();
+  
+  // Special case of predicate
+  if(f.empty() || pred()) {
+    c();
+    std::promise<void> promise;
+    promise.set_value();
+    _decrement_topology_and_notify();
+    return tf::Future<void>(promise.get_future(), std::monostate{});
+  }
+  
+  // Multi-threaded execution.
+  bool run_now {false};
+  
+  // create a topology for this run
+  auto tpg = std::make_shared<Topology>(
+    f, std::forward<P>(pred), std::forward<C>(c)
+  );
+  
+  // need to create future before the topology got torn down quickly
+  tf::Future<void> future(tpg->_promise.get_future(), tpg);
+
+  {
+    std::lock_guard<std::mutex> lock(f._mutex);
+    
+    f._topologies.push(tpg);
+   
+    if(f._topologies.size() == 1) {
+      run_now = true;
+    }
+  }
+  
+  // Notice here calling schedule may cause the topology to be removed sonner 
+  // before the function leaves.
+  if(run_now) {
+    _set_up_topology(tpg.get());
+  }
+
+  return future;
+}
+
+// Function: run_until
+template <typename P, typename C>
+tf::Future<void> Executor::run_until(Taskflow&& f, P&& pred, C&& c) {
+
+  std::list<Taskflow>::iterator itr;
+
+  {
+    std::scoped_lock<std::mutex> lock(_taskflow_mutex);
+    itr = _taskflows.emplace(_taskflows.end(), std::move(f));
+    itr->_satellite = itr;
+  }
+
+  return run_until(*itr, std::forward<P>(pred), std::forward<C>(c));
+}
+
+// Procedure: _increment_topology
+inline void Executor::_increment_topology() {
+  std::lock_guard<std::mutex> lock(_topology_mutex);
+  ++_num_topologies;
+}
+
+// Procedure: _decrement_topology_and_notify
+inline void Executor::_decrement_topology_and_notify() {
+  std::lock_guard<std::mutex> lock(_topology_mutex);
+  if(--_num_topologies == 0) {
+    _topology_cv.notify_all();
+  }
+}
+
+// Procedure: _decrement_topology
+inline void Executor::_decrement_topology() {
+  std::lock_guard<std::mutex> lock(_topology_mutex);
+  --_num_topologies;
+}
+
+// Procedure: wait_for_all
+inline void Executor::wait_for_all() {
+  std::unique_lock<std::mutex> lock(_topology_mutex);
+  _topology_cv.wait(lock, [&](){ return _num_topologies == 0; });
 }
 
 // Function: _set_up_topology
@@ -1052,7 +1253,7 @@ inline void Executor::_tear_down_topology(Topology* tpg) {
       tpg->_call();
     }
 
-    f._mtx.lock();
+    f._mutex.lock();
 
     // If there is another run (interleave between lock)
     if(f._topologies.size() > 1) {
@@ -1064,7 +1265,7 @@ inline void Executor::_tear_down_topology(Topology* tpg) {
       f._topologies.pop();
       tpg = f._topologies.front().get();
 
-      f._mtx.unlock();
+      f._mutex.unlock();
       
       // decrement the topology but since this is not the last we don't notify
       _decrement_topology();
@@ -1079,90 +1280,34 @@ inline void Executor::_tear_down_topology(Topology* tpg) {
       auto p {std::move(tpg->_promise)};
 
       // Back up lambda capture in case it has the topology pointer, 
-      // to avoid it releasing on pop_front ahead of _mtx.unlock & 
+      // to avoid it releasing on pop_front ahead of _mutex.unlock & 
       // _promise.set_value. Released safely when leaving scope.
-      auto c { std::move( tpg->_call ) };
+      auto c {std::move(tpg->_call)};
 
+      // Get the satellite if any
+      auto s {f._satellite};
+      
+      // Now we remove the topology from this taskflow
       f._topologies.pop();
 
-      f._mtx.unlock();
-
-      // We set the promise in the end in case taskflow leaves before taskflow
+      f._mutex.unlock();
+      
+      // We set the promise in the end in case taskflow leaves the scope.
+      // After set_value, the caller will return from wait
       p.set_value();
 
       _decrement_topology_and_notify();
+      
+      // remove the taskflow if it is managed by the executor
+      // TODO: we may need to synchronize on wait (which means the following
+      // code should the moved before set_value
+      if(s) {
+        std::scoped_lock<std::mutex> lock(_taskflow_mutex);
+        _taskflows.erase(*s);
+      } 
+
     }
   }
-}
-
-// Function: run_until
-template <typename P, typename C>
-tf::Future<void> Executor::run_until(Taskflow& f, P&& pred, C&& c) {
-
-  _increment_topology();
-  
-  // Special case of predicate
-  if(f.empty() || pred()) {
-    std::promise<void> promise;
-    promise.set_value();
-    _decrement_topology_and_notify();
-    return tf::Future<void>(promise.get_future(), std::monostate{});
-  }
-  
-  // Multi-threaded execution.
-  bool run_now {false};
-  
-  // create a topology for this run
-  auto tpg = std::make_shared<Topology>(
-    f, std::forward<P>(pred), std::forward<C>(c)
-  );
-  
-  // need to create future before the topology got torn down quickly
-  tf::Future<void> future(tpg->_promise.get_future(), tpg);
-
-  {
-    std::lock_guard<std::mutex> lock(f._mtx);
-    
-    f._topologies.push(tpg);
-   
-    if(f._topologies.size() == 1) {
-      run_now = true;
-    }
-  }
-  
-  // Notice here calling schedule may cause the topology to be removed sonner 
-  // before the function leaves.
-  if(run_now) {
-    _set_up_topology(tpg.get());
-  }
-
-  return future;
-}
-
-// Procedure: _increment_topology
-inline void Executor::_increment_topology() {
-  std::lock_guard<std::mutex> lock(_topology_mutex);
-  ++_num_topologies;
-}
-
-// Procedure: _decrement_topology_and_notify
-inline void Executor::_decrement_topology_and_notify() {
-  std::lock_guard<std::mutex> lock(_topology_mutex);
-  if(--_num_topologies == 0) {
-    _topology_cv.notify_all();
-  }
-}
-
-// Procedure: _decrement_topology
-inline void Executor::_decrement_topology() {
-  std::lock_guard<std::mutex> lock(_topology_mutex);
-  --_num_topologies;
-}
-
-// Procedure: wait_for_all
-inline void Executor::wait_for_all() {
-  std::unique_lock<std::mutex> lock(_topology_mutex);
-  _topology_cv.wait(lock, [&](){ return _num_topologies == 0; });
 }
 
 // ############################################################################
@@ -1195,7 +1340,6 @@ auto Subflow::async(F&& f, ArgsT&&... args) {
 
   _parent->_join_counter.fetch_add(1);
 
-  //using T = typename function_traits<F>::return_type;
   using T = std::invoke_result_t<F, ArgsT...>;
   using R = std::conditional_t<std::is_same_v<T, void>, void, std::optional<T>>;
 

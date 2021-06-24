@@ -13,15 +13,16 @@ template <typename T, typename F>
 void add2() {
 
   //const unsigned N = 1<<20;
+    
+  tf::Taskflow taskflow;
+  tf::Executor executor;
 
   for(size_t N=1; N<=(1<<20); N <<= 1) {
 
-    tf::Taskflow taskflow;
-    tf::Executor executor;
+    taskflow.clear();
 
     T v1 = ::rand() % 100;
     T v2 = ::rand() % 100;
-    T v3 = v1 + v2;
 
     std::vector<T> hx, hy;
 
@@ -47,9 +48,8 @@ void add2() {
       auto d2h_x = cf.copy(hx.data(), dx, N).name("d2h_x");
       auto d2h_y = cf.copy(hy.data(), dy, N).name("d2h_y");
       //auto kernel = cf.add(dx, N, dx, dy);
-      auto kernel = cf.transform(
-        dx, dx+N, [] __device__ (T& v1, T& v2) { return v1 + v2; }, 
-        dx, dy
+      auto kernel = cf.transform(dx, dx+N, dy, 
+        [] __device__ (T x) { return x + 2;  }
       );
       kernel.succeed(h2d_x, h2d_y)
             .precede(d2h_x, d2h_y);
@@ -60,7 +60,8 @@ void add2() {
     // Add a verification task
     auto verifier = taskflow.emplace([&](){
       for (size_t i = 0; i < N; i++) {
-        REQUIRE(std::fabs(hx[i] - v3) < eps);
+        REQUIRE(std::fabs(hx[i] - v1) < eps);
+        REQUIRE(std::fabs(hy[i] - (hx[i] + 2)) < eps);
       }
     }).succeed(cudaflow).name("verify");
 
@@ -76,6 +77,24 @@ void add2() {
     verifier.precede(deallocate_x, deallocate_y);
 
     executor.run(taskflow).wait();
+
+    // standalone tramsform
+    tf::cudaDefaultExecutionPolicy p;
+
+    auto input  = tf::cuda_malloc_shared<T>(N);
+    auto output = tf::cuda_malloc_shared<T>(N);
+    for(size_t n=0; n<N; n++) {
+      input[n] = 1;
+    }
+
+    tf::cuda_transform(p, input, input + N, output, 
+      [] __device__ (T i) { return i+2; }
+    );
+    cudaStreamSynchronize(0);
+
+    for(size_t n=0; n<N; n++) {
+      REQUIRE(output[n] == 3);
+    }
   }
 }
 
@@ -103,228 +122,19 @@ TEST_CASE("capture_add2.double" * doctest::timeout(300)) {
   add2<double, tf::cudaFlowCapturer>();
 }
 
-// --------------------------------------------------------
-// Testcase: add3
-// --------------------------------------------------------
-
-template <typename T, typename F>
-void add3() {
-
-  //const unsigned N = 1<<20;
-
-  for(size_t N=1; N<=(1<<20); N <<= 1) {
-
-    tf::Taskflow taskflow;
-    tf::Executor executor;
-
-    T v1 = ::rand() % 100;
-    T v2 = ::rand() % 100;
-    T v3 = ::rand() % 100;
-    T v4 = v1 + v2 + v3;
-
-    std::vector<T> hx, hy, hz;
-
-    T* dx {nullptr};
-    T* dy {nullptr};
-    T* dz {nullptr};
-    
-    // allocate x
-    auto allocate_x = taskflow.emplace([&]() {
-      hx.resize(N, v1);
-      REQUIRE(cudaMalloc(&dx, N*sizeof(T)) == cudaSuccess);
-    }).name("allocate_x");
-
-    // allocate y
-    auto allocate_y = taskflow.emplace([&]() {
-      hy.resize(N, v2);
-      REQUIRE(cudaMalloc(&dy, N*sizeof(T)) == cudaSuccess);
-    }).name("allocate_y");
-    
-    // allocate z
-    auto allocate_z = taskflow.emplace([&]() {
-      hz.resize(N, v3);
-      REQUIRE(cudaMalloc(&dz, N*sizeof(T)) == cudaSuccess);
-    }).name("allocate_y");
-    
-    // saxpy
-    auto cudaflow = taskflow.emplace([&](F& cf) {
-      auto h2d_x = cf.copy(dx, hx.data(), N).name("h2d_x");
-      auto h2d_y = cf.copy(dy, hy.data(), N).name("h2d_y");
-      auto h2d_z = cf.copy(dz, hz.data(), N).name("h2d_z");
-      auto d2h_x = cf.copy(hx.data(), dx, N).name("d2h_x");
-      auto d2h_y = cf.copy(hy.data(), dy, N).name("d2h_y");
-      auto d2h_z = cf.copy(hz.data(), dz, N).name("d2h_z");
-
-      //auto kernel = cf.add(dx, N, dx, dy, dz);
-      auto kernel = cf.transform(
-        dx, dx+N, [] __device__ (T& v1, T& v2, T& v3) { return v1 + v2 + v3; }, 
-        dx, dy, dz
-      );
-      kernel.succeed(h2d_x, h2d_y, h2d_z)
-            .precede(d2h_x, d2h_y, d2h_z);
-    }).name("saxpy");
-
-    cudaflow.succeed(allocate_x, allocate_y, allocate_z);
-
-    // Add a verification task
-    auto verifier = taskflow.emplace([&](){
-      for (size_t i = 0; i < N; i++) {
-        REQUIRE(std::fabs(hx[i] - v4) < eps);
-      }
-    }).succeed(cudaflow).name("verify");
-
-    // free memory
-    auto deallocate_x = taskflow.emplace([&](){
-      REQUIRE(cudaFree(dx) == cudaSuccess);
-    }).name("deallocate_x");
-    
-    auto deallocate_y = taskflow.emplace([&](){
-      REQUIRE(cudaFree(dy) == cudaSuccess);
-    }).name("deallocate_y");
-    
-    auto deallocate_z = taskflow.emplace([&](){
-      REQUIRE(cudaFree(dz) == cudaSuccess);
-    }).name("deallocate_z");
-
-    verifier.precede(deallocate_x, deallocate_y, deallocate_z);
-
-    executor.run(taskflow).wait();
-  }
-}
-
-TEST_CASE("add3.int" * doctest::timeout(300)) {
-  add3<int, tf::cudaFlow>();
-}
-
-TEST_CASE("add3.float" * doctest::timeout(300)) {
-  add3<float, tf::cudaFlow>();
-}
-
-TEST_CASE("add3.double" * doctest::timeout(300)) {
-  add3<double, tf::cudaFlow>();
-}
-
-TEST_CASE("capture_add3.int" * doctest::timeout(300)) {
-  add3<int, tf::cudaFlowCapturer>();
-}
-
-TEST_CASE("capture_add3.float" * doctest::timeout(300)) {
-  add3<float, tf::cudaFlowCapturer>();
-}
-
-TEST_CASE("capture_add3.double" * doctest::timeout(300)) {
-  add3<double, tf::cudaFlowCapturer>();
-}
-
-// --------------------------------------------------------
-// Testcase: multiply2
-// --------------------------------------------------------
-template <typename T, typename F>
-void multiply2() {
-
-  //const unsigned N = 1<<20;
-
-  for(size_t N=1; N<=(1<<20); N <<= 1) {
-
-    tf::Taskflow taskflow;
-    tf::Executor executor;
-
-    T v1 = ::rand() % 100;
-    T v2 = ::rand() % 100;
-    T v3 = v1 * v2;
-
-    std::vector<T> hx, hy;
-
-    T* dx {nullptr};
-    T* dy {nullptr};
-    
-    // allocate x
-    auto allocate_x = taskflow.emplace([&]() {
-      hx.resize(N, v1);
-      REQUIRE(cudaMalloc(&dx, N*sizeof(T)) == cudaSuccess);
-    }).name("allocate_x");
-
-    // allocate y
-    auto allocate_y = taskflow.emplace([&]() {
-      hy.resize(N, v2);
-      REQUIRE(cudaMalloc(&dy, N*sizeof(T)) == cudaSuccess);
-    }).name("allocate_y");
-    
-    // saxpy
-    auto cudaflow = taskflow.emplace([&](F& cf) {
-      auto h2d_x = cf.copy(dx, hx.data(), N).name("h2d_x");
-      auto h2d_y = cf.copy(dy, hy.data(), N).name("h2d_y");
-      auto d2h_x = cf.copy(hx.data(), dx, N).name("d2h_x");
-      auto d2h_y = cf.copy(hy.data(), dy, N).name("d2h_y");
-
-      //auto kernel = cf.multiply(dx, N, dx, dy);
-      auto kernel = cf.transform(
-        dx, dx+N, [] __device__ (T& v1, T& v2) { return v1 * v2; }, 
-        dx, dy
-      );
-      kernel.succeed(h2d_x, h2d_y)
-            .precede(d2h_x, d2h_y);
-    }).name("saxpy");
-
-    cudaflow.succeed(allocate_x, allocate_y);
-
-    // Add a verification task
-    auto verifier = taskflow.emplace([&](){
-      for (size_t i = 0; i < N; i++) {
-        REQUIRE(std::fabs(hx[i] - v3) < eps);
-      }
-    }).succeed(cudaflow).name("verify");
-
-    // free memory
-    auto deallocate_x = taskflow.emplace([&](){
-      REQUIRE(cudaFree(dx) == cudaSuccess);
-    }).name("deallocate_x");
-    
-    auto deallocate_y = taskflow.emplace([&](){
-      REQUIRE(cudaFree(dy) == cudaSuccess);
-    }).name("deallocate_y");
-
-    verifier.precede(deallocate_x, deallocate_y);
-
-    executor.run(taskflow).wait();
-  }
-}
-
-TEST_CASE("multiply2.int" * doctest::timeout(300)) {
-  multiply2<int, tf::cudaFlow>();
-}
-
-TEST_CASE("multiply2.float" * doctest::timeout(300)) {
-  multiply2<float, tf::cudaFlow>();
-}
-
-TEST_CASE("multiply2.double" * doctest::timeout(300)) {
-  multiply2<double, tf::cudaFlow>();
-}
-
-TEST_CASE("capture_multiply2.int" * doctest::timeout(300)) {
-  multiply2<int, tf::cudaFlowCapturer>();
-}
-
-TEST_CASE("capture_multiply2.float" * doctest::timeout(300)) {
-  multiply2<float, tf::cudaFlowCapturer>();
-}
-
-TEST_CASE("capture_multiply2.double" * doctest::timeout(300)) {
-  multiply2<double, tf::cudaFlowCapturer>();
-}
-
 // ----------------------------------------------------------------------------
 // for_each
 // ----------------------------------------------------------------------------
 
 template <typename T, typename F>
 void for_each() {
+    
+  tf::Taskflow taskflow;
+  tf::Executor executor;
 
-  for(int n=1; n<=123456; n = n*2 + 1) {
+  for(int n=1; n<=1234567; n = n*2 + 1) {
 
-    tf::Taskflow taskflow;
-    tf::Executor executor;
+    taskflow.clear();
     
     T* cpu = nullptr;
     T* gpu = nullptr;
@@ -356,30 +166,49 @@ void for_each() {
 
     std::free(cpu);
     REQUIRE(cudaFree(gpu) == cudaSuccess);
+
+    // standard algorithm: for_each
+    auto g_data = tf::cuda_malloc_shared<T>(n);
+
+    for(int i=0; i<n; i++) {
+      g_data[i] = 0;
+    }
+
+    tf::cuda_for_each(tf::cudaDefaultExecutionPolicy{},
+      g_data, g_data + n, [] __device__ (T& val) { val = 12222; }
+    );
+
+    cudaStreamSynchronize(0);
+    
+    for(int i=0; i<n; i++) {
+      REQUIRE(std::fabs(g_data[i] - (T)12222) < eps);
+    }
+
+    tf::cuda_free(g_data);
   }
 }
 
-TEST_CASE("for_each.int" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.for_each.int" * doctest::timeout(300)) {
   for_each<int, tf::cudaFlow>();
 }
 
-TEST_CASE("for_each.float" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.for_each.float" * doctest::timeout(300)) {
   for_each<float, tf::cudaFlow>();
 }
 
-TEST_CASE("for_each.double" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.for_each.double" * doctest::timeout(300)) {
   for_each<double, tf::cudaFlow>();
 }
 
-TEST_CASE("capture_for_each.int" * doctest::timeout(300)) {
+TEST_CASE("capture.for_each.int" * doctest::timeout(300)) {
   for_each<int, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_for_each.float" * doctest::timeout(300)) {
+TEST_CASE("capture.for_each.float" * doctest::timeout(300)) {
   for_each<float, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_for_each.double" * doctest::timeout(300)) {
+TEST_CASE("capture.for_each.double" * doctest::timeout(300)) {
   for_each<double, tf::cudaFlowCapturer>();
 }
 
@@ -390,7 +219,7 @@ TEST_CASE("capture_for_each.double" * doctest::timeout(300)) {
 template <typename T, typename F>
 void for_each_index() {
 
-  for(int n=10; n<=123456; n = n*2 + 1) {
+  for(int n=10; n<=1234567; n = n*2 + 1) {
 
     tf::Taskflow taskflow;
     tf::Executor executor;
@@ -437,27 +266,27 @@ void for_each_index() {
   }
 }
 
-TEST_CASE("for_each_index.int" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.for_each_index.int" * doctest::timeout(300)) {
   for_each_index<int, tf::cudaFlow>();
 }
 
-TEST_CASE("for_each_index.float" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.for_each_index.float" * doctest::timeout(300)) {
   for_each_index<float, tf::cudaFlow>();
 }
 
-TEST_CASE("for_each_index.double" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.for_each_index.double" * doctest::timeout(300)) {
   for_each_index<double, tf::cudaFlow>();
 }
 
-TEST_CASE("capture_for_each_index.int" * doctest::timeout(300)) {
+TEST_CASE("capture.for_each_index.int" * doctest::timeout(300)) {
   for_each_index<int, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_for_each_index.float" * doctest::timeout(300)) {
+TEST_CASE("capture.for_each_index.float" * doctest::timeout(300)) {
   for_each_index<float, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_for_each_index.double" * doctest::timeout(300)) {
+TEST_CASE("capture.for_each_index.double" * doctest::timeout(300)) {
   for_each_index<double, tf::cudaFlowCapturer>();
 }
 
@@ -467,79 +296,40 @@ TEST_CASE("capture_for_each_index.double" * doctest::timeout(300)) {
 
 template <typename F>
 void transform() {
-
-  for(unsigned n=1; n<=123456; n = n*2 + 1) {
-
-    tf::Taskflow taskflow;
-    tf::Executor executor;
+  
+  F cudaflow;
     
-    int* htgt = nullptr;
-    int* tgt = nullptr;
-    int* hsrc1 = nullptr;
-    int* src1 = nullptr;
-    float* hsrc2 = nullptr;
-    float* src2 = nullptr;
-    double* hsrc3 = nullptr;
-    double* src3 = nullptr;
+  for(unsigned n=1; n<=1234567; n = n*2 + 1) {
 
-    auto htgttask = taskflow.emplace([&](){
-      htgt = static_cast<int*>(std::calloc(n, sizeof(int)));
-      hsrc1 = static_cast<int*>(std::calloc(n, sizeof(int)));
-      hsrc2 = static_cast<float*>(std::calloc(n, sizeof(float)));
-      hsrc3 = static_cast<double*>(std::calloc(n, sizeof(double)));
-      REQUIRE(cudaMalloc(&tgt, n*sizeof(int)) == cudaSuccess);
-      REQUIRE(cudaMalloc(&src1, n*sizeof(int)) == cudaSuccess);
-      REQUIRE(cudaMalloc(&src2, n*sizeof(float)) == cudaSuccess);
-      REQUIRE(cudaMalloc(&src3, n*sizeof(double)) == cudaSuccess);
-    });
+    cudaflow.clear();
 
-    auto gputask = taskflow.emplace([&](F& cf) {
-      auto d2h = cf.copy(htgt, tgt, n);
-      auto d2h3 = cf.copy(hsrc3, src3, n);
-      auto d2h2 = cf.copy(hsrc2, src2, n);
-      auto d2h1 = cf.copy(hsrc1, src1, n);
-      auto kernel = cf.transform(
-        tgt, tgt+n, 
-        [] __device__ (int& v1, float& v2, double& v3) -> int {
-          v1 = 1;
-          v2 = 3.0f;
-          v3 = 5.0;
-          return 17;
-        }, 
-        src1, src2, src3
-      );
-      auto h2d = cf.copy(tgt, htgt, n);
-      h2d.precede(kernel);
-      kernel.precede(d2h, d2h1, d2h2, d2h3);
-    });
+    auto src1 = tf::cuda_malloc_shared<int>(n);
+    auto src2 = tf::cuda_malloc_shared<int>(n);
+    auto dest = tf::cuda_malloc_shared<int>(n);
 
-    htgttask.precede(gputask);
-    
-    executor.run(taskflow).wait();
-
-    for(unsigned i=0; i<n; ++i) {
-      REQUIRE(htgt[i] == 17);
-      REQUIRE(hsrc1[i] == 1);
-      REQUIRE(std::fabs(hsrc2[i] - 3.0f) < eps);
-      REQUIRE(std::fabs(hsrc3[i] - 5.0) < eps);
+    for(unsigned i=0; i<n; i++) {
+      src1[i] = 10;
+      src2[i] = 90;
+      dest[i] = 0;
     }
 
-    std::free(htgt);
-    std::free(hsrc1);
-    std::free(hsrc2);
-    std::free(hsrc3);
-    REQUIRE(cudaFree(tgt) == cudaSuccess);
-    REQUIRE(cudaFree(src1) == cudaSuccess);
-    REQUIRE(cudaFree(src2) == cudaSuccess);
-    REQUIRE(cudaFree(src3) == cudaSuccess);
+    cudaflow.transform(src1, src1+n, src2, dest,
+      []__device__(int s1, int s2) { return s1 + s2; } 
+    );
+
+    cudaflow.offload();
+
+    for(unsigned i=0; i<n; i++){
+      REQUIRE(dest[i] == src1[i] + src2[i]);
+    }
   }
 }
 
-TEST_CASE("transform" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.transform" * doctest::timeout(300)) {
   transform<tf::cudaFlow>();
 }
 
-TEST_CASE("capture_transform" * doctest::timeout(300) ) {
+TEST_CASE("capture.transform" * doctest::timeout(300) ) {
   transform<tf::cudaFlowCapturer>();
 }
 
@@ -550,7 +340,7 @@ TEST_CASE("capture_transform" * doctest::timeout(300) ) {
 template <typename T, typename F>
 void reduce() {
 
-  for(int n=1; n<=123456; n = n*2 + 1) {
+  for(int n=1; n<=1234567; n = n*2 + 1) {
 
     tf::Taskflow taskflow;
     tf::Executor executor;
@@ -582,7 +372,7 @@ void reduce() {
         *res = 1000;
       });
       auto kernel = cf.reduce(
-        gpu, gpu+n, res, [] __device__ (T a, T b) { 
+        gpu, gpu+n, res, [] __device__ (T a, T b) mutable { 
           return a + b;
         }
       );
@@ -601,27 +391,27 @@ void reduce() {
   }
 }
 
-TEST_CASE("reduce.int" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.reduce.int" * doctest::timeout(300)) {
   reduce<int, tf::cudaFlow>();
 }
 
-TEST_CASE("reduce.float" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.reduce.float" * doctest::timeout(300)) {
   reduce<float, tf::cudaFlow>();
 }
 
-TEST_CASE("reduce.double" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.reduce.double" * doctest::timeout(300)) {
   reduce<double, tf::cudaFlow>();
 }
 
-TEST_CASE("capture_reduce.int" * doctest::timeout(300)) {
+TEST_CASE("capture.reduce.int" * doctest::timeout(300)) {
   reduce<int, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_reduce.float" * doctest::timeout(300)) {
+TEST_CASE("capture.reduce.float" * doctest::timeout(300)) {
   reduce<float, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_reduce.double" * doctest::timeout(300)) {
+TEST_CASE("capture.reduce.double" * doctest::timeout(300)) {
   reduce<double, tf::cudaFlow>();
 }
 
@@ -632,7 +422,7 @@ TEST_CASE("capture_reduce.double" * doctest::timeout(300)) {
 template <typename T, typename F>
 void uninitialized_reduce() {
 
-  for(int n=1; n<=123456; n = n*2 + 1) {
+  for(int n=1; n<=1234567; n = n*2 + 1) {
 
     tf::Taskflow taskflow;
     tf::Executor executor;
@@ -683,31 +473,966 @@ void uninitialized_reduce() {
   }
 }
 
-TEST_CASE("uninitialized_reduce.int" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.uninitialized_reduce.int" * doctest::timeout(300)) {
   uninitialized_reduce<int, tf::cudaFlow>();
 }
 
-TEST_CASE("uninitialized_reduce.float" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.uninitialized_reduce.float" * doctest::timeout(300)) {
   uninitialized_reduce<float, tf::cudaFlow>();
 }
 
-TEST_CASE("uninitialized_reduce.double" * doctest::timeout(300)) {
+TEST_CASE("cudaflow.uninitialized_reduce.double" * doctest::timeout(300)) {
   uninitialized_reduce<double, tf::cudaFlow>();
 }
 
-TEST_CASE("capture_uninitialized_reduce.int" * doctest::timeout(300)) {
+TEST_CASE("capture.uninitialized_reduce.int" * doctest::timeout(300)) {
   uninitialized_reduce<int, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_uninitialized_reduce.float" * doctest::timeout(300)) {
+TEST_CASE("capture.uninitialized_reduce.float" * doctest::timeout(300)) {
   uninitialized_reduce<float, tf::cudaFlowCapturer>();
 }
 
-TEST_CASE("capture_uninitialized_reduce.double" * doctest::timeout(300)) {
+TEST_CASE("capture.uninitialized_reduce.double" * doctest::timeout(300)) {
   uninitialized_reduce<double, tf::cudaFlow>();
 }
 
-/*// ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// transform_reduce
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void transform_reduce() {
+    
+  tf::Executor executor;
+
+  for(int n=1; n<=1234567; n = n*2 + 1) {
+
+    tf::Taskflow taskflow;
+
+    T sum = 0;
+
+    std::vector<T> cpu(n);
+    for(auto& i : cpu) {
+      i = ::rand()%100-50;
+      sum += i;
+    }
+
+    T sol;
+    
+    T* gpu = nullptr;
+    T* res = nullptr;
+
+    auto cputask = taskflow.emplace([&](){
+      REQUIRE(cudaMalloc(&gpu, n*sizeof(T)) == cudaSuccess);
+      REQUIRE(cudaMalloc(&res, 1*sizeof(T)) == cudaSuccess);
+    });
+
+    tf::Task gputask;
+    
+    gputask = taskflow.emplace([&](F& cf) {
+      auto d2h = cf.copy(&sol, res, 1);
+      auto h2d = cf.copy(gpu, cpu.data(), n);
+      auto set = cf.single_task([res] __device__ () mutable {
+        *res = 1000;
+      });
+      auto kernel = cf.transform_reduce(
+        gpu, gpu+n, res, 
+        [] __device__ (T a, T b) { return a + b; },
+        [] __device__ (T a) { return a + 1; }
+      );
+      kernel.succeed(h2d, set);
+      d2h.succeed(kernel);
+    });
+
+    cputask.precede(gputask);
+    
+    executor.run(taskflow).wait();
+
+    REQUIRE(std::fabs(sum+n+1000-sol) < 0.0001);
+
+    REQUIRE(cudaFree(gpu) == cudaSuccess);
+    REQUIRE(cudaFree(res) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.transform_reduce.int" * doctest::timeout(300)) {
+  transform_reduce<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.transform_reduce.float" * doctest::timeout(300)) {
+  transform_reduce<float, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.transform_reduce.double" * doctest::timeout(300)) {
+  transform_reduce<double, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.transform_reduce.int" * doctest::timeout(300)) {
+  transform_reduce<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.transform_reduce.float" * doctest::timeout(300)) {
+  transform_reduce<float, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.transform_reduce.double" * doctest::timeout(300)) {
+  transform_reduce<double, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// transform_uninitialized_reduce
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void transform_uninitialized_reduce() {
+    
+  tf::Executor executor;
+
+  for(int n=1; n<=1234567; n = n*2 + 1) {
+
+    tf::Taskflow taskflow;
+
+    T sum = 0;
+
+    std::vector<T> cpu(n);
+    for(auto& i : cpu) {
+      i = ::rand()%100-50;
+      sum += i;
+    }
+
+    T sol;
+    
+    T* gpu = nullptr;
+    T* res = nullptr;
+
+    auto cputask = taskflow.emplace([&](){
+      REQUIRE(cudaMalloc(&gpu, n*sizeof(T)) == cudaSuccess);
+      REQUIRE(cudaMalloc(&res, 1*sizeof(T)) == cudaSuccess);
+    });
+
+    tf::Task gputask;
+    
+    gputask = taskflow.emplace([&](F& cf) {
+      auto d2h = cf.copy(&sol, res, 1);
+      auto h2d = cf.copy(gpu, cpu.data(), n);
+      auto set = cf.single_task([res] __device__ () mutable {
+        *res = 1000;
+      });
+      auto kernel = cf.transform_uninitialized_reduce(
+        gpu, gpu+n, res, 
+        [] __device__ (T a, T b) { return a + b; },
+        [] __device__ (T a) { return a + 1; }
+      );
+      kernel.succeed(h2d, set);
+      d2h.succeed(kernel);
+    });
+
+    cputask.precede(gputask);
+    
+    executor.run(taskflow).wait();
+
+    REQUIRE(std::fabs(sum+n-sol) < 0.0001);
+
+    REQUIRE(cudaFree(gpu) == cudaSuccess);
+    REQUIRE(cudaFree(res) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.transform_uninitialized_reduce.int" * doctest::timeout(300)) {
+  transform_uninitialized_reduce<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.transform_uninitialized_reduce.float" * doctest::timeout(300)) {
+  transform_uninitialized_reduce<float, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.transform_uninitialized_reduce.double" * doctest::timeout(300)) {
+  transform_uninitialized_reduce<double, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.transform_uninitialized_reduce.int" * doctest::timeout(300)) {
+  transform_uninitialized_reduce<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.transform_uninitialized_reduce.float" * doctest::timeout(300)) {
+  transform_uninitialized_reduce<float, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.transform_uninitialized_reduce.double" * doctest::timeout(300)) {
+  transform_uninitialized_reduce<double, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// scan
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void scan() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=1; N<=1234567; N = N*2 + 1) {
+
+    taskflow.clear();
+  
+    auto data1 = tf::cuda_malloc_shared<T>(N);
+    auto data2 = tf::cuda_malloc_shared<T>(N);
+    auto scan1 = tf::cuda_malloc_shared<T>(N);
+    auto scan2 = tf::cuda_malloc_shared<T>(N);
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      data1[i] = T(i);
+      data2[i] = T(i);
+      scan1[i] = 0;
+      scan2[i] = 0;
+    }
+    
+    // perform reduction
+    taskflow.emplace([&](F& cudaflow){
+      // inclusive scan
+      cudaflow.inclusive_scan(
+        data1, data1+N, scan1, [] __device__ (T a, T b){ return a+b; }
+      );
+      // exclusive scan
+      cudaflow.exclusive_scan(
+        data2, data2+N, scan2, [] __device__ (T a, T b){ return a+b; }
+      );
+    });
+
+    executor.run(taskflow).wait();
+    
+    // inspect 
+    for(int i=1; i<N; i++) {
+      REQUIRE(scan1[i] == (scan1[i-1]+data1[i]));
+      REQUIRE(scan2[i] == (scan2[i-1]+data2[i-1]));
+    }
+
+    // test standalone algorithms
+    
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      data1[i] = T(i);
+      data2[i] = T(i);
+      scan1[i] = 0;
+      scan2[i] = 0;
+    }
+
+    // allocate temporary buffer
+    tf::cudaScopedDeviceMemory<std::byte> temp(
+      tf::cuda_scan_buffer_size<tf::cudaDefaultExecutionPolicy, T>(N)
+    );
+      
+    tf::cuda_inclusive_scan(tf::cudaDefaultExecutionPolicy{}, 
+      data1, data1+N, scan1, tf::cuda_plus<T>{}, temp.data()
+    );
+    cudaStreamSynchronize(0);
+
+    tf::cuda_exclusive_scan(tf::cudaDefaultExecutionPolicy{}, 
+      data2, data2+N, scan2, tf::cuda_plus<T>{}, temp.data()
+    );
+    cudaStreamSynchronize(0);
+    
+    // inspect 
+    for(int i=1; i<N; i++) {
+      REQUIRE(scan1[i] == (scan1[i-1]+data1[i]));
+      REQUIRE(scan2[i] == (scan2[i-1]+data2[i-1]));
+    }
+
+    REQUIRE(cudaFree(data1) == cudaSuccess);
+    REQUIRE(cudaFree(data2) == cudaSuccess);
+    REQUIRE(cudaFree(scan1) == cudaSuccess);
+    REQUIRE(cudaFree(scan2) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.scan.int" * doctest::timeout(300)) {
+  scan<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.scan.size_t" * doctest::timeout(300)) {
+  scan<size_t, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.scan.int" * doctest::timeout(300)) {
+  scan<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.scan.size_t" * doctest::timeout(300)) {
+  scan<size_t, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// transofrm scan
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void transform_scan() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=1; N<=1234567; N = N*2 + 1) {
+
+    taskflow.clear();
+  
+    auto data1 = tf::cuda_malloc_shared<T>(N);
+    auto data2 = tf::cuda_malloc_shared<T>(N);
+    auto scan1 = tf::cuda_malloc_shared<T>(N);
+    auto scan2 = tf::cuda_malloc_shared<T>(N);
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      data1[i] = T(i);
+      data2[i] = T(i);
+      scan1[i] = 0;
+      scan2[i] = 0;
+    }
+    
+    // perform reduction
+    taskflow.emplace([&](F& cudaflow){
+      // inclusive scan
+      cudaflow.transform_inclusive_scan(
+        data1, data1+N, scan1, 
+        [] __device__ (T a, T b){ return a+b; },
+        [] __device__ (T a) { return a*10; }
+      );
+      // exclusive scan
+      cudaflow.transform_exclusive_scan(
+        data2, data2+N, scan2, 
+        [] __device__ (T a, T b){ return a+b; },
+        [] __device__ (T a) { return a*10; }
+      );
+    });
+
+    executor.run(taskflow).wait();
+    
+    // standalone algorithms
+    
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      data1[i] = T(i);
+      data2[i] = T(i);
+      scan1[i] = 0;
+      scan2[i] = 0;
+    }
+    
+    // allocate temporary buffer
+    tf::cudaScopedDeviceMemory<std::byte> temp(
+      tf::cuda_scan_buffer_size<tf::cudaDefaultExecutionPolicy, T>(N)
+    );
+      
+    tf::cuda_transform_inclusive_scan(tf::cudaDefaultExecutionPolicy{},
+      data1, data1+N, scan1, 
+      [] __device__ (T a, T b){ return a+b; },
+      [] __device__ (T a) { return a*10; },
+      temp.data()
+    );
+    cudaStreamSynchronize(0);
+      
+    tf::cuda_transform_exclusive_scan(tf::cudaDefaultExecutionPolicy{},
+      data2, data2+N, scan2, 
+      [] __device__ (T a, T b){ return a+b; },
+      [] __device__ (T a) { return a*10; },
+      temp.data()
+    );
+    cudaStreamSynchronize(0);
+    
+    // inspect 
+    for(int i=1; i<N; i++) {
+      REQUIRE(scan1[i] == (scan1[i-1]+data1[i]*10));
+      REQUIRE(scan2[i] == (scan2[i-1]+data2[i-1]*10));
+    }
+
+    REQUIRE(cudaFree(data1) == cudaSuccess);
+    REQUIRE(cudaFree(data2) == cudaSuccess);
+    REQUIRE(cudaFree(scan1) == cudaSuccess);
+    REQUIRE(cudaFree(scan2) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.scan.int" * doctest::timeout(300)) {
+  transform_scan<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.scan.size_t" * doctest::timeout(300)) {
+  transform_scan<size_t, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.transform_scan.int" * doctest::timeout(300)) {
+  transform_scan<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.transform_scan.size_t" * doctest::timeout(300)) {
+  transform_scan<size_t, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// merge
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void merge_keys() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=0; N<=1234567; N = N*2 + 1) {
+
+    taskflow.clear();
+
+    auto a = tf::cuda_malloc_shared<T>(N);
+    auto b = tf::cuda_malloc_shared<T>(N);
+    auto c = tf::cuda_malloc_shared<T>(2*N);
+
+    auto p = tf::cudaDefaultExecutionPolicy{};
+
+    // ----------------- standalone algorithms
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a[i] = T(rand()%100);
+      b[i] = T(rand()%100);
+    }
+
+    std::sort(a, a+N);
+    std::sort(b, b+N);
+    
+    auto bufsz = tf::cuda_merge_buffer_size<decltype(p)>(N, N);
+    tf::cudaScopedDeviceMemory<std::byte> buf(bufsz);
+
+    tf::cuda_merge(p, a, a+N, b, b+N, c, tf::cuda_less<T>{}, buf.data());
+    p.synchronize();
+
+    REQUIRE(std::is_sorted(c, c+2*N));
+    
+    // ----------------- cudaFlow capturer
+    for(int i=0; i<N*2; i++) {
+      c[i] = rand();      
+    }
+    
+    taskflow.emplace([&](F& cudaflow){
+      cudaflow.merge(a, a+N, b, b+N, c, tf::cuda_less<T>{});
+    });
+
+    executor.run(taskflow).wait();
+    
+    REQUIRE(std::is_sorted(c, c+2*N));
+    
+    REQUIRE(cudaFree(a) == cudaSuccess);
+    REQUIRE(cudaFree(b) == cudaSuccess);
+    REQUIRE(cudaFree(c) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.merge_keys.int" * doctest::timeout(300)) {
+  merge_keys<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.merge_keys.float" * doctest::timeout(300)) {
+  merge_keys<float, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.merge_keys.int" * doctest::timeout(300)) {
+  merge_keys<int, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.merge_keys.float" * doctest::timeout(300)) {
+  merge_keys<float, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// merge_by_keys
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void merge_keys_values() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=0; N<=1234567; N = N*2 + 1) {
+
+    taskflow.clear();
+
+    auto a_k = tf::cuda_malloc_shared<T>(N);
+    auto b_k = tf::cuda_malloc_shared<T>(N);
+    auto c_k = tf::cuda_malloc_shared<T>(2*N);
+    auto a_v = tf::cuda_malloc_shared<int>(N);
+    auto b_v = tf::cuda_malloc_shared<int>(N);
+    auto c_v = tf::cuda_malloc_shared<int>(2*N);
+
+    auto p = tf::cudaDefaultExecutionPolicy{};
+
+    // ----------------- standalone algorithms
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a_k[i] =  (i*2+1);
+      a_v[i] = -(i*2+1);
+      b_k[i] =  (i+1)*2;
+      b_v[i] = -(i+1)*2;
+      c_k[i] = c_k[i+N] = c_v[i] = c_v[i+N] = 0;
+    }
+
+    auto bufsz = tf::cuda_merge_buffer_size<decltype(p)>(N, N);
+    tf::cudaScopedDeviceMemory<std::byte> buf(bufsz);
+
+    tf::cuda_merge_by_key(
+      p, 
+      a_k, a_k+N, a_v, 
+      b_k, b_k+N, b_v,
+      c_k, c_v,
+      tf::cuda_less<T>{}, 
+      buf.data()
+    );
+    p.synchronize();
+
+    for(int i=0; i<2*N; i++) {
+      REQUIRE(c_k[i] == (i+1));
+      REQUIRE(c_v[i] == -(i+1));
+    }
+    
+    // ----------------- cudaFlow capturer
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a_k[i] =  (i*2+1);
+      a_v[i] = -(i*2+1);
+      b_k[i] =  (i+1)*2;
+      b_v[i] = -(i+1)*2;
+      c_k[i] = c_k[i+N] = c_v[i] = c_v[i+N] = 0;
+    }
+    
+    taskflow.emplace([&](F& cudaflow){
+      cudaflow.merge_by_key(
+        a_k, a_k+N, a_v, b_k, b_k+N, b_v, c_k, c_v, tf::cuda_less<T>{}
+      );
+    });
+
+    executor.run(taskflow).wait();
+    
+    for(int i=0; i<2*N; i++) {
+      REQUIRE(c_k[i] == (i+1));
+      REQUIRE(c_v[i] == -(i+1));
+    }
+    
+    REQUIRE(cudaFree(a_k) == cudaSuccess);
+    REQUIRE(cudaFree(b_k) == cudaSuccess);
+    REQUIRE(cudaFree(c_k) == cudaSuccess);
+    REQUIRE(cudaFree(a_v) == cudaSuccess);
+    REQUIRE(cudaFree(b_v) == cudaSuccess);
+    REQUIRE(cudaFree(c_v) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.merge_keys_values.int" * doctest::timeout(300)) {
+  merge_keys_values<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.merge_keys_values.float" * doctest::timeout(300)) {
+  merge_keys_values<float, tf::cudaFlow>();
+}
+
+TEST_CASE("capturer.merge_keys_values.int" * doctest::timeout(300)) {
+  merge_keys_values<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capturer.merge_keys_values.float" * doctest::timeout(300)) {
+  merge_keys_values<float, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// sort
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void sort_keys() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=0; N<=1234567; N = N*2 + 1) {
+
+    taskflow.clear();
+
+    auto a = tf::cuda_malloc_shared<T>(N);
+    auto p = tf::cudaDefaultExecutionPolicy{};
+
+    // ----------------- standalone asynchronous algorithms
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a[i] = T(rand()%1000);
+    }
+
+    auto bufsz = tf::cuda_sort_buffer_size<decltype(p), T>(N);
+    tf::cudaScopedDeviceMemory<std::byte> buf(bufsz);
+    tf::cuda_sort(p, a, a+N, tf::cuda_less<T>{}, buf.data());
+    p.synchronize();
+    REQUIRE(std::is_sorted(a, a+N));
+
+    // ----------------- cudaflow capturer
+    for(int i=0; i<N; i++) {
+      a[i] = T(rand()%1000);
+    }
+    
+    taskflow.emplace([&](F& cudaflow){
+      cudaflow.sort(a, a+N, tf::cuda_less<T>{});
+    });
+
+    executor.run(taskflow).wait();
+
+    REQUIRE(std::is_sorted(a, a+N));
+    
+    REQUIRE(cudaFree(a) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.sort_keys.int" * doctest::timeout(300)) {
+  sort_keys<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.sort_keys.float" * doctest::timeout(300)) {
+  sort_keys<float, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.sort_keys.int" * doctest::timeout(300)) {
+  sort_keys<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.sort_keys.float" * doctest::timeout(300)) {
+  sort_keys<float, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// sort key-value
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void sort_keys_values() {
+
+  std::random_device rd;
+  std::mt19937 g(rd());
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=1; N<=1234567; N = N*2 + 1) {
+
+    taskflow.clear();
+
+    auto a = tf::cuda_malloc_shared<T>(N);
+    auto b = tf::cuda_malloc_shared<int>(N);
+    auto p = tf::cudaDefaultExecutionPolicy{};
+
+    std::vector<int> indices(N);
+
+    // ----------------- standalone asynchronous algorithms
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a[i] = i;
+      b[i] = i;
+      indices[i] = i;
+      //printf("a[%d]=%d, b[%d]=%d\n", i, a[i], i, b[i]);
+    }
+    std::shuffle(a, a+N, g);
+
+    std::sort(indices.begin(), indices.end(), [&](auto i, auto j){
+      return a[i] < a[j];
+    });
+
+    auto bufsz = tf::cuda_sort_buffer_size<decltype(p), T, int>(N);
+    tf::cudaScopedDeviceMemory<std::byte> buf(bufsz);
+    tf::cuda_sort_by_key(p, a, a+N, b, tf::cuda_less<T>{}, buf.data());
+    p.synchronize();
+
+    REQUIRE(std::is_sorted(a, a+N));
+    for(int i=0; i<N; i++) {
+      REQUIRE(indices[i] == b[i]);
+    }
+
+    // ----------------- cudaflow capturer
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      b[i] = i;
+      indices[i] = i;
+      //printf("a[%d]=%d, b[%d]=%d\n", i, a[i], i, b[i]);
+    }
+    std::shuffle(a, a+N, g);
+
+    std::sort(indices.begin(), indices.end(), [&](auto i, auto j){
+      return a[i] > a[j];
+    });
+
+    taskflow.emplace([&](F& cudaflow){
+      cudaflow.sort_by_key(a, a+N, b, tf::cuda_greater<T>{});
+    });
+
+    executor.run(taskflow).wait();
+
+    REQUIRE(std::is_sorted(a, a+N, std::greater<T>{}));
+    for(int i=0; i<N; i++) {
+      REQUIRE(indices[i] == b[i]);
+    }
+    
+    REQUIRE(cudaFree(a) == cudaSuccess);
+    REQUIRE(cudaFree(b) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.sort_keys_values.int" * doctest::timeout(300)) {
+  sort_keys_values<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.sort_keys_values.float" * doctest::timeout(300)) {
+  sort_keys_values<float, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.sort_keys_values.int" * doctest::timeout(300)) {
+  sort_keys_values<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.sort_keys_values.float" * doctest::timeout(300)) {
+  sort_keys_values<float, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// find-if
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void find_if() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=0; N<=1234567; N += std::max(N/100, 1)) {
+
+    taskflow.clear();
+
+    auto a = tf::cuda_malloc_shared<T>(N);
+    auto r = tf::cuda_malloc_shared<unsigned>(1);
+    auto p = tf::cudaDefaultExecutionPolicy{};
+    
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a[i] = i;
+    }
+    *r = 1234;
+
+    // ----------------- standalone asynchronous algorithms
+
+    tf::cuda_find_if(p, a, a+N, r, []__device__(int v){ return v == 5000; });
+    p.synchronize();
+
+    if(N <= 5000) {
+      REQUIRE(*r == N);
+    }
+    else {
+      REQUIRE(*r == 5000);
+    }
+
+    // ----------------- cudaflow capturer
+    *r = 1234;
+    
+    taskflow.emplace([&](F& cudaflow){
+      cudaflow.find_if(a, a+N, r, []__device__(int v){ return v == 5000; });
+    });
+
+    executor.run(taskflow).wait();
+    
+    if(N <= 5000) {
+      REQUIRE(*r == N);
+    }
+    else {
+      REQUIRE(*r == 5000);
+    }
+    
+    REQUIRE(cudaFree(a) == cudaSuccess);
+    REQUIRE(cudaFree(r) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.find_if.int" * doctest::timeout(300)) {
+  find_if<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.find_if.float" * doctest::timeout(300)) {
+  find_if<float, tf::cudaFlow>();
+}
+
+TEST_CASE("capture.find_if.int" * doctest::timeout(300)) {
+  find_if<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capture.find_if.float" * doctest::timeout(300)) {
+  find_if<float, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// min_element
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void min_element() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=0; N<=1234567; N += std::max(N/10, 1)) {
+
+    taskflow.clear();
+
+    auto a = tf::cuda_malloc_shared<T>(N);
+    auto r = tf::cuda_malloc_shared<unsigned>(1);
+    auto p = tf::cudaDefaultExecutionPolicy{};
+    auto min = std::numeric_limits<T>::max();
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a[i] = rand();
+      min = std::min(min, a[i]);
+    }
+    *r = 1234;
+
+    // ----------------- standalone asynchronous algorithms
+
+    tf::cudaScopedDeviceMemory<std::byte> buf(
+      tf::cuda_min_element_buffer_size<decltype(p), T>(N)
+    );
+
+    tf::cuda_min_element(
+      p, a, a+N, r, tf::cuda_less<T>{}, buf.data()
+    );
+    p.synchronize();
+
+    if(min != std::numeric_limits<T>::max()) {
+      REQUIRE(a[*r] == min);
+    }
+    else {
+      REQUIRE(*r == N);
+    }
+    
+    // ----------------- cudaflow
+    *r = 1234;
+    
+    taskflow.emplace([&](F& cudaflow){
+      cudaflow.min_element(a, a+N, r, tf::cuda_less<T>{});
+    });
+
+    executor.run(taskflow).wait();
+    
+    if(min != std::numeric_limits<T>::max()) {
+      REQUIRE(a[*r] == min);
+    }
+    else {
+      REQUIRE(*r == N);
+    }
+    
+    REQUIRE(cudaFree(a) == cudaSuccess);
+    REQUIRE(cudaFree(r) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.min_element.int" * doctest::timeout(300)) {
+  min_element<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.min_element.float" * doctest::timeout(300)) {
+  min_element<float, tf::cudaFlow>();
+}
+
+TEST_CASE("capturer.min_element.int" * doctest::timeout(300)) {
+  min_element<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capturer.min_element.float" * doctest::timeout(300)) {
+  min_element<float, tf::cudaFlowCapturer>();
+}
+
+// ----------------------------------------------------------------------------
+// max_element
+// ----------------------------------------------------------------------------
+
+template <typename T, typename F>
+void max_element() {
+    
+  tf::Executor executor;
+  tf::Taskflow taskflow;
+
+  for(int N=0; N<=1234567; N += std::max(N/10, 1)) {
+
+    taskflow.clear();
+
+    auto a = tf::cuda_malloc_shared<T>(N);
+    auto r = tf::cuda_malloc_shared<unsigned>(1);
+    auto p = tf::cudaDefaultExecutionPolicy{};
+    auto max = std::numeric_limits<T>::lowest();
+
+    // initialize the data
+    for(int i=0; i<N; i++) {
+      a[i] = rand();
+      max = std::max(max, a[i]);
+    }
+    *r = 1234;
+
+    // ----------------- standalone asynchronous algorithms
+
+    tf::cudaScopedDeviceMemory<std::byte> buf(
+      tf::cuda_max_element_buffer_size<decltype(p), T>(N)
+    );
+
+    tf::cuda_max_element(p, a, a+N, r, tf::cuda_less<T>{}, buf.data());
+    p.synchronize();
+
+    if(max != std::numeric_limits<T>::lowest()) {
+      REQUIRE(a[*r] == max);
+    }
+    else {
+      REQUIRE(*r == N);
+    }
+    
+    // ----------------- cudaflow
+    *r = 1234;
+    
+    taskflow.emplace([&](F& cudaflow){
+      cudaflow.max_element(a, a+N, r, tf::cuda_less<T>{});
+    });
+
+    executor.run(taskflow).wait();
+    
+    if(max != std::numeric_limits<T>::lowest()) {
+      REQUIRE(a[*r] == max);
+    }
+    else {
+      REQUIRE(*r == N);
+    }
+    
+    REQUIRE(cudaFree(a) == cudaSuccess);
+    REQUIRE(cudaFree(r) == cudaSuccess);
+  }
+}
+
+TEST_CASE("cudaflow.max_element.int" * doctest::timeout(300)) {
+  max_element<int, tf::cudaFlow>();
+}
+
+TEST_CASE("cudaflow.max_element.float" * doctest::timeout(300)) {
+  max_element<float, tf::cudaFlow>();
+}
+
+TEST_CASE("capturer.max_element.int" * doctest::timeout(300)) {
+  max_element<int, tf::cudaFlowCapturer>();
+}
+
+TEST_CASE("capturer.max_element.float" * doctest::timeout(300)) {
+  max_element<float, tf::cudaFlowCapturer>();
+}
+
+/*// --------------------------------------------------------------------------
 // row-major transpose
 // ----------------------------------------------------------------------------
 

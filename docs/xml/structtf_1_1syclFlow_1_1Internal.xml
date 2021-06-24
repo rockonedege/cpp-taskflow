@@ -41,13 +41,13 @@
     <detaileddescription>
     </detaileddescription>
     <collaborationgraph>
-      <node id="92">
+      <node id="110">
         <label>tf::syclFlow::Internal</label>
-        <childnode refid="93" relation="usage">
+        <childnode refid="111" relation="usage">
           <edgelabel>executor</edgelabel>
         </childnode>
       </node>
-      <node id="93">
+      <node id="111">
         <label>tf::Executor</label>
         <link refid="classtf_1_1Executor"/>
       </node>

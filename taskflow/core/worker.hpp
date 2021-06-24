@@ -14,7 +14,7 @@ namespace tf {
 /**
 @private
 */
-struct Worker {
+class Worker {
 
   friend class Executor;
   friend class WorkerView;
@@ -28,6 +28,30 @@ struct Worker {
     std::default_random_engine _rdgen { std::random_device{}() };
     TaskQueue<Node*> _wsq;
 };
+
+/**
+@private
+*/
+struct PerThreadWorker {
+
+  Worker* worker;
+
+  PerThreadWorker() : worker {nullptr} {}
+
+  PerThreadWorker(const PerThreadWorker&) = delete;
+  PerThreadWorker(PerThreadWorker&&) = delete;
+
+  PerThreadWorker& operator = (const PerThreadWorker&) = delete;
+  PerThreadWorker& operator = (PerThreadWorker&&) = delete;
+};
+
+/**
+@private
+*/
+inline PerThreadWorker& this_worker() {
+  thread_local PerThreadWorker worker;
+  return worker;
+}
 
 // ----------------------------------------------------------------------------
 // Class Definition: WorkerView

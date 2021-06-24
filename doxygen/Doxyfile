@@ -38,7 +38,7 @@ PROJECT_NAME           = "Taskflow"
 # could be handy for archiving the generated documentation or if some version
 # control system is used.
 
-PROJECT_NUMBER         = 3.1.0-Master-Branch
+PROJECT_NUMBER         = 3.2.0-Master-Branch
 
 # Using the PROJECT_BRIEF tag one can provide an optional one line description
 # for a project that appears at the top of each page and should give viewer a
@@ -850,12 +850,18 @@ INPUT                  = ../taskflow/core/flow_builder.hpp \
                          ../taskflow/cuda/cuda_flow.hpp \
                          ../taskflow/cuda/cuda_optimizer.hpp \
                          ../taskflow/cuda/cuda_capturer.hpp \
-                         ../taskflow/cuda/cublas/cublas_flow.hpp \
+                         ../taskflow/cuda/cuda_execution_policy.hpp \
+                         ../taskflow/cuda/cuda_algorithm/cuda_for_each.hpp \
+                         ../taskflow/cuda/cuda_algorithm/cuda_transform.hpp \
+                         ../taskflow/cuda/cuda_algorithm/cuda_reduce.hpp \
+                         ../taskflow/cuda/cuda_algorithm/cuda_scan.hpp \
+                         ../taskflow/cuda/cuda_algorithm/cuda_merge.hpp \
+                         ../taskflow/cuda/cuda_algorithm/cuda_sort.hpp \
+                         ../taskflow/cuda/cuda_algorithm/cuda_find.hpp \
                          ../taskflow/sycl/sycl_task.hpp \
                          ../taskflow/sycl/sycl_flow.hpp \
                          ../taskflow/taskflow.hpp \
                          ../taskflow/cudaflow.hpp \
-                         ../taskflow/cublasflow.hpp \
                          ../taskflow/syclflow.hpp \
                          QuickStart.dox \
                          releases/releases.dox \
@@ -895,22 +901,36 @@ INPUT                  = ../taskflow/core/flow_builder.hpp \
                          algorithms/for_each.dox \
                          algorithms/reduce.dox \
                          algorithms/sort.dox \
-                         cuda_algorithms/cuda_algorithms.dox \
-                         cuda_algorithms/cuda_single_task.dox \
-                         cuda_algorithms/cuda_for_each.dox \
-                         cuda_algorithms/cuda_transform.dox \
-                         cuda_algorithms/cuda_reduce.dox \
-                         cuda_algorithms/cublas/cublas_flow_capturer.dox \
+                         cudaflow_algorithms/cudaflow_algorithms.dox \
+                         cudaflow_algorithms/cudaflow_single_task.dox \
+                         cudaflow_algorithms/cudaflow_for_each.dox \
+                         cudaflow_algorithms/cudaflow_transform.dox \
+                         cudaflow_algorithms/cudaflow_reduce.dox \
+                         cudaflow_algorithms/cudaflow_scan.dox \
+                         cudaflow_algorithms/cudaflow_merge.dox \
+                         cudaflow_algorithms/cudaflow_sort.dox \
+                         cudaflow_algorithms/cudaflow_find.dox \
                          sycl_algorithms/sycl_algorithms.dox \
                          sycl_algorithms/sycl_single_task.dox \
                          sycl_algorithms/sycl_for_each.dox \
                          sycl_algorithms/sycl_transform.dox \
                          sycl_algorithms/sycl_reduce.dox \
+                         cuda_std_algorithms/cuda_std_algorithms.dox \
+                         cuda_std_algorithms/cuda_std_execution_policy.dox \
+                         cuda_std_algorithms/cuda_std_for_each.dox \
+                         cuda_std_algorithms/cuda_std_transform.dox \
+                         cuda_std_algorithms/cuda_std_reduce.dox \
+                         cuda_std_algorithms/cuda_std_scan.dox \
+                         cuda_std_algorithms/cuda_std_merge.dox \
+                         cuda_std_algorithms/cuda_std_sort.dox \
+                         cuda_std_algorithms/cuda_std_find.dox \
                          examples/examples.dox \
                          examples/wavefront.dox \
                          examples/matrix_multiplication.dox \
-                         examples/fibonacci.dox \
+                         examples/matrix_multiplication_cudaflow.dox \
                          examples/kmeans.dox \
+                         examples/kmeans_cudaflow.dox \
+                         examples/fibonacci.dox \
                          examples/flipcoins.dox \
                          examples/graph_traversal.dox \
                          usecases/usecases.dox \
