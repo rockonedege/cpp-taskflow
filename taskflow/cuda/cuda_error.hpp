@@ -16,11 +16,44 @@
 #define TF_CHECK_CUDA(...)                                       \
 if(TF_CUDA_GET_FIRST(__VA_ARGS__) != cudaSuccess) {              \
   std::ostringstream oss;                                        \
-  auto ev = TF_CUDA_GET_FIRST(__VA_ARGS__);                      \
+  auto __ev__ = TF_CUDA_GET_FIRST(__VA_ARGS__);                  \
   oss << "[" << __FILE__ << ":" << __LINE__ << "] "              \
-      << (cudaGetErrorString(ev)) << " ("                        \
-      << (cudaGetErrorName(ev)) << ") - ";                       \
+      << (cudaGetErrorString(__ev__)) << " ("                    \
+      << (cudaGetErrorName(__ev__)) << ") - ";                   \
   tf::ostreamize(oss, TF_CUDA_REMOVE_FIRST(__VA_ARGS__));        \
   throw std::runtime_error(oss.str());                           \
 }
 
+#if __CUDACC_VER_MAJOR__ >= 13
+#define TF_CUDA_POST13(X) X
+#define TF_CUDA_PRE13(X)
+#else
+#define TF_CUDA_PRE13(X) X
+#define TF_CUDA_POST13(X)
+#endif
+
+namespace tf {
+
+/**
+@struct cudaProxyDeleter
+
+@brief deleter that forwards a CUDA handle to the destroy function @c F
+
+@tparam F CUDA runtime function that destroys a handle (e.g., @c cudaEventDestroy)
+
+This stateless deleter lets `std::unique_ptr` manage a CUDA handle without
+storing a function pointer, for example,
+`std::unique_ptr<std::remove_pointer_t<cudaEvent_t>, cudaProxyDeleter<cudaEventDestroy>>`.
+*/
+template <auto F>
+struct cudaProxyDeleter {
+
+  /**
+  @brief destroys the given CUDA handle by calling @c F
+  */
+  void operator()(auto handle) const noexcept {
+    F(handle);
+  }
+};
+
+}  // end of namespace tf -----------------------------------------------------

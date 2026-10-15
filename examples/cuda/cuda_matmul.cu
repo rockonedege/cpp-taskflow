@@ -1,7 +1,8 @@
 // The example shows how to use cudaFlow to multiply two 2D matrices.
 
 #include <taskflow/taskflow.hpp>
-#include <taskflow/cudaflow.hpp>
+#include <taskflow/algorithm/for_each.hpp>
+#include <taskflow/cuda/cudaflow.hpp>
 
 // Kernel: matmul
 __global__ void matmul(int *a, int *b, int *c, int m, int n, int k) {
@@ -44,21 +45,27 @@ auto gpu(int M, int N, int K) {
   }).name("allocate_c");
   
   // create a cudaFlow to run the matrix multiplication
-  auto cudaFlow = taskflow.emplace([&](tf::cudaFlow& cf){
+  auto cudaFlow = taskflow.emplace([&](){
+
+    tf::cudaGraph cg;
 
     // copy data to da, db, and dc
-    auto copy_da = cf.copy(da, ha.data(), M*N).name("H2D_a");
-    auto copy_db = cf.copy(db, hb.data(), N*K).name("H2D_b");
-    auto copy_hc = cf.copy(hc.data(), dc, M*K).name("D2H_c"); 
-    
+    auto copy_da = cg.copy(da, ha.data(), M*N);
+    auto copy_db = cg.copy(db, hb.data(), N*K);
+    auto copy_hc = cg.copy(hc.data(), dc, M*K); 
+
     dim3 grid  ((K+16-1)/16, (M+16-1)/16);
     dim3 block (16, 16);
 
-    auto kmatmul = cf.kernel(grid, block, 0, matmul, da, db, dc, M, N, K)
-                     .name("matmul");
+    auto kmatmul = cg.kernel(grid, block, 0, matmul, da, db, dc, M, N, K);
 
     kmatmul.succeed(copy_da, copy_db)
            .precede(copy_hc);
+    
+    tf::cudaStream stream;
+    tf::cudaGraphExec exec(cg);
+    stream.run(exec).synchronize();
+    cg.dump(std::cout);
 
   }).name("cudaFlow");
 

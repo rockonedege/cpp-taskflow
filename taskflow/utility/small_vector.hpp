@@ -11,15 +11,8 @@
 #include <iterator>
 #include <memory>
 
-#if defined(__GNUC__)
-  #define TF_LIKELY(x) (__builtin_expect((x), 1))
-  #define TF_UNLIKELY(x) (__builtin_expect((x), 0))
-#else
-  #define TF_LIKELY(x) (x)
-  #define TF_UNLIKELY(x) (x)
-#endif
 
-/** 
+/**
 @file small_vector.hpp
 @brief small vector include file
 */
@@ -54,8 +47,8 @@ template <typename T>
 struct IsPod : std::integral_constant<bool, std::is_standard_layout<T>::value &&
                                             std::is_trivial<T>::value> {};
 
-/** 
-@private 
+/**
+@private
 */
 class SmallVectorBase {
 protected:
@@ -93,11 +86,17 @@ protected:
 
 public:
   /// This returns size()*sizeof(T).
+  /**
+  @private
+  */
   size_t size_in_bytes() const {
     return size_t((char*)EndX - (char*)BeginX);
   }
 
   /// capacity_in_bytes - This returns capacity()*sizeof(T).
+  /**
+  @private
+  */
   size_t capacity_in_bytes() const {
     return size_t((char*)CapacityX - (char*)BeginX);
   }
@@ -110,8 +109,8 @@ public:
 */
 template <typename T, unsigned N> struct SmallVectorStorage;
 
-/** 
-@private 
+/**
+@private
 */
 template <typename T, typename = void>
 class SmallVectorTemplateCommon : public SmallVectorBase {
@@ -119,11 +118,25 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
   private:
   template <typename, unsigned> friend struct SmallVectorStorage;
 
+  //template <typename X>
+  //struct AlignedUnionType {
+  //  alignas(X) std::byte buff[std::max(sizeof(std::byte), sizeof(X))];
+  //};
+
+  template <typename X>
+  struct AlignedUnionType {
+    static constexpr std::size_t max_size = (sizeof(std::byte) > sizeof(X)) ? sizeof(std::byte) : sizeof(X);
+    alignas(X) std::byte buff[max_size];
+  };
+
   // Allocate raw space for N elements of type T.  If T has a ctor or dtor, we
   // don't want it to be automatically run, so we need to represent the space as
   // something else.  Use an array of char of sufficient alignment.
-  ////////////typedef tf::AlignedCharArrayUnion<T> U;
-  typedef typename std::aligned_union<1, T>::type U;
+  
+  // deprecated in c++23
+  //typedef typename std::aligned_union<1, T>::type U;
+  typedef AlignedUnionType<T> U;
+
   U FirstEl;
   // Space after 'FirstEl' is clobbered, do not add any instance vars after it.
 
@@ -146,7 +159,7 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
   }
 
   void setEnd(T *P) { this->EndX = P; }
-  
+
   public:
   typedef size_t size_type;
   typedef ptrdiff_t difference_type;
@@ -172,7 +185,7 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
 
   iterator capacity_ptr() { return (iterator)this->CapacityX; }
   const_iterator capacity_ptr() const { return (const_iterator)this->CapacityX;}
-  
+
   public:
 
   // reverse iterator creation methods.
@@ -261,14 +274,14 @@ protected:
 
 public:
   void push_back(const T &Elt) {
-    if (TF_UNLIKELY(this->EndX >= this->CapacityX))
+    if ((this->EndX >= this->CapacityX)) [[unlikely]]
       this->grow();
     ::new ((void*) this->end()) T(Elt);
     this->setEnd(this->end()+1);
   }
 
   void push_back(T &&Elt) {
-    if (TF_UNLIKELY(this->EndX >= this->CapacityX))
+    if ((this->EndX >= this->CapacityX)) [[unlikely]]
       this->grow();
     ::new ((void*) this->end()) T(::std::move(Elt));
     this->setEnd(this->end()+1);
@@ -357,7 +370,7 @@ protected:
   }
 public:
   void push_back(const T &Elt) {
-    if (TF_UNLIKELY(this->EndX >= this->CapacityX))
+    if ((this->EndX >= this->CapacityX)) [[unlikely]]
       this->grow();
     memcpy(this->end(), &Elt, sizeof(T));
     this->setEnd(this->end()+1);
@@ -368,7 +381,7 @@ public:
   }
 };
 
-/** 
+/**
 @private
 */
 template <typename T>
@@ -688,7 +701,7 @@ public:
   }
 
   template <typename... ArgTypes> void emplace_back(ArgTypes &&... Args) {
-    if (TF_UNLIKELY(this->EndX >= this->CapacityX))
+    if ((this->EndX >= this->CapacityX)) [[unlikely]]
       this->grow();
     ::new ((void *)this->end()) T(std::forward<ArgTypes>(Args)...);
     this->setEnd(this->end() + 1);
@@ -905,14 +918,14 @@ template <typename T> struct SmallVectorStorage<T, 0> {};
 
 The class defines a C++ STL-styled vector (a variable-sized array)
 optimized for the case when the array is small.
-It contains some number of elements in-place, 
+It contains some number of elements in-place,
 which allows it to avoid heap allocation when the actual number of
 elements is below that threshold. This allows normal @em small cases to be
 fast without losing generality for large inputs.
 All the methods in [std::vector](https://en.cppreference.com/w/cpp/container/vector)
 can apply to this class.
 
-The class is stripped from the LLVM codebase. 
+The class is stripped from the LLVM codebase.
 */
 template <typename T, unsigned N = 2>
 class SmallVector : public SmallVectorImpl<T> {
@@ -926,7 +939,7 @@ public:
   */
   SmallVector() : SmallVectorImpl<T>(N) {
   }
-  
+
   /**
   @brief constructs a vector with @c Size copies of elements with value @c value
   */
@@ -934,9 +947,9 @@ public:
     : SmallVectorImpl<T>(N) {
     this->assign(Size, Value);
   }
-  
+
   /**
-  @brief constructs a vector with the contents of the range 
+  @brief constructs a vector with the contents of the range
          <tt>[S, E)</tt>
    */
   template<typename ItTy>
@@ -949,14 +962,14 @@ public:
   //    : SmallVectorImpl<T>(N) {
   //  this->append(R.begin(), R.end());
   //}
-  
+
   /**
   @brief constructs a vector with the contents of the initializer list @c IL
   */
   SmallVector(std::initializer_list<T> IL) : SmallVectorImpl<T>(N) {
     this->assign(IL);
   }
-  
+
   /**
   @brief constructs the vector with the copy of the contents of @c RHS
   */
@@ -964,7 +977,7 @@ public:
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(RHS);
   }
-  
+
   /**
   @brief constructs the vector with the contents of @c RHS using move semantics
   */
@@ -972,7 +985,7 @@ public:
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
-  
+
   /**
   @brief replaces the contents with a copy of the contents of @c RHS
   */
@@ -980,7 +993,7 @@ public:
     SmallVectorImpl<T>::operator=(RHS);
     return *this;
   }
-  
+
   /**
   @brief replaces the contents with the contents of @c RHS using move semantics
   */
@@ -988,7 +1001,7 @@ public:
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
-  
+
   /**
   @brief constructs a vector with the contents of @c RHS using move semantics
   */
@@ -996,7 +1009,7 @@ public:
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
-  
+
   /**
   @brief replaces the contents with the contents of @c RHS using move semantics
    */
@@ -1004,7 +1017,7 @@ public:
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
-  
+
   /**
   @brief replaces the contents with the copy of the contents of an initializer list @c IL
    */
@@ -1014,8 +1027,11 @@ public:
   }
 };
 
+/**
+@private
+*/
 template<typename T, unsigned N>
-static inline size_t capacity_in_bytes(const SmallVector<T, N> &X) {
+inline size_t capacity_in_bytes(const SmallVector<T, N> &X) {
   return X.capacity_in_bytes();
 }
 

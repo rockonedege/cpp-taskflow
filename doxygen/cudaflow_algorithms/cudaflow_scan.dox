@@ -7,6 +7,11 @@ on a CUDA GPU.
 
 @tableofcontents
 
+@section CUDAParallelScanIncludeTheHeader Include the Header
+
+You need to include the header file, `%taskflow/cuda/algorithm/scan.hpp`, 
+for creating a parallel-scan task.
+
 @section cudaFlowScanARangeOfItems Scan a Range of Items
 
 tf::cudaFlow::inclusive_scan computes an inclusive prefix sum operation using
@@ -91,7 +96,7 @@ for(size_t i=1; i<N; i++) {
 Similarly, tf::cudaFlow::transform_exclusive_scan performs an exclusive prefix sum
 over a range of transformed items.
 The following code computes the exclusive prefix sum over 1000000 transformed items
-each multipled by 10.
+each multiplied by 10.
 
 @code{.cpp}
 const size_t N = 1000000;

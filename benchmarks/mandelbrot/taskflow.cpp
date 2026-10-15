@@ -1,9 +1,9 @@
 #include "mandel.hpp"
-#include <taskflow/taskflow.hpp> 
+#include <taskflow/taskflow.hpp>
+#include <taskflow/algorithm/for_each.hpp>
 
-void mandelbrot_taskflow(unsigned num_threads, int d = D) {
+void mandelbrot_taskflow(tf::Executor& executor, int d = D) {
 
-  tf::Executor executor {num_threads};
   tf::Taskflow taskflow;
 
   taskflow.for_each_index(0, H, 1, [&](int i){
@@ -13,14 +13,15 @@ void mandelbrot_taskflow(unsigned num_threads, int d = D) {
       auto k = 3 * ( j * W + i );
       std::tie(RGB[k], RGB[k+1], RGB[k+2]) = get_color(value);
     }
-  });
+  }, tf::DynamicPartitioner(1));
 
   executor.run(taskflow).wait();
-} 
+}
 
 std::chrono::microseconds measure_time_taskflow(unsigned num_threads) {
+  static tf::Executor executor {num_threads};
   auto beg = std::chrono::high_resolution_clock::now();
-  mandelbrot_taskflow(num_threads);
+  mandelbrot_taskflow(executor);
   auto end = std::chrono::high_resolution_clock::now();
   return std::chrono::duration_cast<std::chrono::microseconds>(end - beg);
 }

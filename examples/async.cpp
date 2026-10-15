@@ -3,28 +3,27 @@
 #include <taskflow/taskflow.hpp>
 
 int main() {
-  
+
   tf::Executor executor;
-  
+
   // create asynchronous tasks from the executor
   // (using executor as a thread pool)
-  tf::Future<std::optional<int>> future1 = executor.async([](){
-    std::cout << "async task 1 returns 1\n";
+  std::future<int> fu1 = executor.async("async1", [](){
+    std::cout << "async task returns 1\n";
     return 1;
   });
 
-  executor.silent_async([](){  // silent async task doesn't return
-    std::cout << "async task 2 does not return (silent)\n";
+  executor.silent_async("async2", [](){  // silent async task doesn't return any future object
+    std::cout << "silent async does not return\n";
   });
 
-  // create asynchronous tasks with names (for profiling)
-  executor.named_async("async_task", [](){
-    std::cout << "named async task returns 1\n";
-    return 1;
+  // create async tasks with runtime
+  std::future<void> fu2 = executor.async([](tf::Runtime& rt){
+    printf("async task with a runtime: %p\n", &rt);
   });
 
-  executor.named_silent_async("silent_async_task", [](){
-    std::cout << "named silent async task does not return\n";
+  executor.silent_async([](tf::Runtime& rt){
+    printf("silent async task with a runtime: %p\n", &rt);
   });
 
   executor.wait_for_all();  // wait for the two async tasks to finish
@@ -35,15 +34,15 @@ int main() {
 
   std::atomic<int> counter {0};
 
-  taskflow.emplace([&](tf::Subflow& sf){
+  taskflow.emplace([&](tf::Runtime& rt){
     for(int i=0; i<100; i++) {
-      sf.silent_async([&](){ counter.fetch_add(1, std::memory_order_relaxed); });
+      rt.silent_async([&](){ counter.fetch_add(1, std::memory_order_relaxed); });
     }
-    sf.join();
+    rt.corun();
 
     // when subflow joins, all spawned tasks from the subflow will finish
     if(counter == 100) {
-      std::cout << "async tasks spawned from the subflow all finish\n";
+      std::cout << "async tasks spawned from the runtime all finish\n";
     }
     else {
       throw std::runtime_error("this should not happen");
@@ -51,7 +50,9 @@ int main() {
   });
 
   executor.run(taskflow).wait();
-
+  
   return 0;
 }
+
+
 

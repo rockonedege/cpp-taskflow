@@ -10,24 +10,24 @@ This page describes the upcoming milestones of the %Taskflow project.
 
 @section MilestoneSummary Milestone Summary
 
-The table below summarizes the milestones of %Taskflow we plan to achieve 
-by the end of 2021.
-Each milestone releases technical items that significantly 
-enhances the capability of %Taskflow.
+The table below summarizes the milestones (technical goals that significantly enhance the capability of %Taskflow) we plan to achieve in the long run:
 
 <div align="center">
-| Milestone | Release | Time of Arrival   |
-| :-:       | :-:     | :-:                         |
-| Design a pipeline interface using task graph parallelism | v3.x | (under progress) |
-| Design a distributed tasking interface with scheduling | v3.x | (under progress) |
-| Integrate thread sanitizer into the CI | v3.3 | (under progress) |
-| Integrate OpenCL and SYCL to tf::syclFlow | v3.1 | 2021/04/14 (done) |
-| Integrate @cuBLAS into tf::cudaFlow | v3.0 | 2020/01/01 (done) |
-| Support building %cudaFlow through stream capture | v3.0 | 2021/01/01 (done) |
-| Support profiling large data in tfprof  | v3.0 | 2021/01/01 (done) |
-| Support cancelling %Taskflow  | v3.0 | 2021/01/01 (done) |
-| Support limiting maximum concurrency  | v3.0 | 2021/01/01 (done) |
-| Migrate the codebase to C++17 | v3.0 | 2021/01/01 (done) |
+| Milestone | Release | 
+| :-:       | :-:     | 
+| Design a distributed task graph programming model | TBD | 
+| Migrate the codebase to C++20 | @ref release-4-0-0 | 
+| Design a TBB-inspired task group programming model | @ref release-4-0-0 |
+| Design a video suite ([Taskflow Academy](https://github.com/taskflow/academy)) for leaning %Taskflow | @ref release-4-0-0 | 
+| Design a custom thread-creation interface | @ref release-3-9-0 | 
+| Design a dynamic task graph programming model | @ref release-3-6-0 |
+| Design a task-parallel pipeline programming framework | @ref release-3-3-0 |
+| Integrate thread sanitizer into the CI | @ref release-3-3-0 |
+| Support GPU tasking through %cudaFlow atop CUDA %Graph | @ref release-3-0-0 |
+| Support profiling large data in tfprof  | @ref release-3-0-0 |
+| Support cancelling %Taskflow  | @ref release-3-0-0 | 
+| Support limiting maximum concurrency  | @ref release-3-0-0 | 
+| Migrate the codebase to C++17 | @ref release-3-0-0 |
 </div>
 
 Along with the project development, we expect to have multiple releases

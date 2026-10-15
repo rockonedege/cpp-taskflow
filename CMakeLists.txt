@@ -4,25 +4,48 @@
 # To enable thread sanitizer: 
 # -DCMAKE_CXX_FLAGS="-fsanitize=thread -g"
 #
-# To enable address and leak sanitizers
+# To enable address and leak sanitizers:
 # -DCMAKE_CXX_FLAGS="-fsanitize=address  -fsanitize=leak -g"
+#
+# To enable different c++ standards:
+# -DCMAKE_CXX_STANDARD=20
+# -DCMAKE_CXX_STANDARD=23
+#
+# To turn on/off taskflow macros:
+# -DTF_DISABLE_EXCEPTION_HANDLING
+# -DTF_ENABLE_ATOMIC_NOTIFIER         // default choice under C++20
+# -DTF_ENABLE_TASK_PRIORITY=ON
+#
+# To build different targets:
+# -DTF_BUILD_BENCHMARKS=OFF/ON        // default OFF
+# -DTF_BUILD_EXAMPLES=OFF/ON          // default ON
+# -DTF_BUILD_PROFILER=OFF/ON          // default OFF
+# -DTF_BUILD_TESTS=OFF/ON             // default ON
 # -------------------------------------------------------------------
 
 
 # CMake version
-cmake_minimum_required (VERSION 3.12)
+cmake_minimum_required (VERSION 3.18)
 MESSAGE(STATUS "CMAKE_ROOT: " ${CMAKE_ROOT})
 
 # Project name
-project(Taskflow VERSION 3.3.0 LANGUAGES CXX)
+project(Taskflow VERSION 4.1.0 LANGUAGES CXX)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # build options
 option(TF_BUILD_BENCHMARKS "Enables builds of benchmarks" OFF)
+option(TF_BUILD_PROFILER "Enables builds of profiler" OFF)
 option(TF_BUILD_CUDA "Enables builds of cuda code" OFF)
-option(TF_BUILD_SYCL "Enables builds of sycl code" OFF)
 option(TF_BUILD_TESTS "Enables builds of tests" ON)
 option(TF_BUILD_EXAMPLES "Enables builds of examples" ON)
-option(TF_BUILD_PROFILER "Enables builds of profiler" OFF)
+option(TF_BUILD_MODULES "Enables C++ modules" OFF)
+
+# feature options
+option(TF_ENABLE_TASK_PRIORITY "Enables task priority scheduling" OFF)
 
 # project-specific variables
 set(TF_UTEST_DIR ${PROJECT_SOURCE_DIR}/unittests)
@@ -41,31 +64,37 @@ include(CheckLanguage)
 # Adhere to GNU conventions
 include(GNUInstallDirs)
 
+# Check for correct settings for atomic library
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Atomic/CheckAtomic.cmake)
+
 # Compiler vendors
-## g++
+## g++ >= 11.0
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "7.0")
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "11.0")
     message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
-    message(FATAL_ERROR "\nTaskflow requires g++ at least v7.0")
+    message(FATAL_ERROR "\nTaskflow requires GNU g++ at least v11.0 with -std=c++20")
   endif()
-## clang++
+## clang++ >= 12.0
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0")
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "12.0")
     message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
-    message(FATAL_ERROR "\nTaskflow requires clang++ at least v6.0")
-  endif() 
-## AppleClang
+    message(FATAL_ERROR "\nTaskflow requires Clang at least v12.0 with -std=c++20")
+  endif()
+## AppleClang >= 13.0
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "8.0")
-    message(FATAL_ERROR "\nTaskflow requires AppleClang at least v8.0")
-  endif()
-## microsoft visual c++
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-  add_definitions(/bigobj)
-  if(NOT MSVC_VERSION GREATER_EQUAL 1914)
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
     message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
-    message(FATAL_ERROR "\nTaskflow requires MSVC++ at least v14.14") 
+    message(FATAL_ERROR "\nTaskflow requires AppleClang at least v13.0 with -std=c++20")
   endif()
+## MSVC >= 19.29 (VS 2019)
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  # MSVC_VERSION is an integer like 1929 for 19.29
+  if (MSVC_VERSION LESS 1929)
+    message(STATUS "MSVC_VERSION: ${MSVC_VERSION}")
+    message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
+    message(FATAL_ERROR "\nTaskflow requires Microsoft Visual C++ at least v19.29 (VS 2019) with /std:c++20")
+  endif()
+
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "19.0.1")
     message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
@@ -74,11 +103,11 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
 else()
   message(FATAL_ERROR "\n\
 Taskflow currently supports the following compilers:\n\
-  - g++ v7.0 or above\n\
-  - clang++ v6.0 or above\n\
-  - MSVC++ v19.14 or above\n\
-  - AppleClang v8 or above\n\
-  - Intel v19.0.1 or above\n\
+  - GNU g++ v11.0 or above with -std=c++20\n\
+  - Clang++ v12.0 or above with -std=c++20\n\
+  - MSVC++ v19.14 or above with /std:c++20\n\
+  - AppleClang v13.0 or above with -std=c++20\n\
+  - Intel oneAPI DPC++/C++ (IntelLLVM) v2022.0 or above with -std=c++20\n\
 ")
 endif()
 
@@ -93,9 +122,9 @@ if(TF_BUILD_CUDA)
     message(FATAL_ERROR "\nNo CUDA compiler found")
   endif()
   enable_language(CUDA)
-  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "11")
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "12")
     message(STATUS "CMAKE_CUDA_COMPILER_VERSION: ${CMAKE_CUDA_COMPILER_VERSION}")
-    message(FATAL_ERROR "\nTaskflow requires CUDA at least v11")
+    message(FATAL_ERROR "\nTaskflow requires CUDA at least v12")
   endif()
   
   ## configure cuBLAS
@@ -108,32 +137,7 @@ if(TF_BUILD_CUDA)
 endif()
 
 # -----------------------------------------------------------------------------
-# find ComputeCpp
-# https://developer.codeplay.com/products/computecpp/ce/guides/integration-guide
-# -----------------------------------------------------------------------------
-# Users can specify:
-# 1. -DComputeCpp_DIR=/path/to/ComputeCpp/
-# 2. -DCOMPUTECPP_BITCODE=ptx64 (default spir64)
-# For example:
-# cmake ../ -DTF_BUILD_SYCL=ON 
-#           -DCOMPUTECPP_BITCODE=ptx64 
-#           -DComputeCpp_DIR=$COMPUTECPP_HOME
-#if(TF_BUILD_SYCL)
-#  message(STATUS "Configuring ComputeCpp for SYCL ...")
-#  message(STATUS "You may specify '-DComputeCpp_DIR=/path/to/ComputeCpp/'")
-#  message(STATUS "You may specify '-DCOMPUTECPP_BITCODE=ptx64' for Nvidia devices")
-#  list(APPEND CMAKE_MODULE_PATH ${TF_CMAKE_DIR}/ComputeCpp/Modules/)
-#  if(NOT ComputeCpp_DIR)
-#    message(FATAL_ERROR "Please specify -DComputeCpp_DIR=/path/to/ComputeCpp/")
-#  endif()
-#  find_package(ComputeCpp REQUIRED)
-#  message(STATUS "ComputeCpp_DIR: " ${ComputeCpp_DIR})
-#  message(STATUS "ComputeCpp_INCLUDE_DIRS: " ${ComputeCpp_INCLUDE_DIRS})
-#  include_directories(${ComputeCpp_INCLUDE_DIRS})
-#endif()
-
-# -----------------------------------------------------------------------------
-# defult release build
+# default to release build, unless explicitly specified
 # -----------------------------------------------------------------------------
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to '${TF_DEFAULT_BUILD_TYPE}'")
@@ -164,10 +168,10 @@ add_library(tf::error_settings ALIAS error_settings)
 target_compile_options(
   error_settings
   INTERFACE
-  $<$<CXX_COMPILER_ID:AppleClang>:-Wall -Wextra -Wfatal-errors>
-  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:-Wall -Wextra -Wfatal-errors>
-  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-Wall -Wextra -Wfatal-errors>
-  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/W3 /permissive->
+  $<$<CXX_COMPILER_ID:AppleClang>:-Wall -Wextra -Wfatal-errors -Wshadow>
+  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:-Wall -Wextra -Wfatal-errors -Wshadow>
+  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-Wall -Wextra -Wfatal-errors -Wshadow>
+  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/W4 /WX>
 )
 
 # cuda compiler options
@@ -177,20 +181,11 @@ if(TF_BUILD_CUDA)
     error_settings
     BEFORE
     INTERFACE
-    $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda -Xcompiler=-Wall,-Wextra,-Wfatal-errors>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:CLANG>>:--extended-lambda -Xcompiler=-Wall,-Wextra,-Wfatal-errors,-Wshadow>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:GNU>>:--extended-lambda -Xcompiler=-Wall,-Wextra,-Wfatal-errors,-Wshadow>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:MSVC>>:--extended-lambda -Xcompiler=/W4 /WX>
   )
 endif(TF_BUILD_CUDA)
-
-# sycl compiler options (currently support only DPC++)
-if(TF_BUILD_SYCL)
-  message(STATUS "Configuring SYCL compiler options ...")
-  message(STATUS "You may specify -DTF_BUILD_SYCL_BITCODE=ptx64 for CUDA devices")
-  list(APPEND TF_SYCL_OPTIONS -fsycl -fsycl-unnamed-lambda)
-  if(TF_BUILD_SYCL_BITCODE STREQUAL "ptx64")
-    message(STATUS "Configuring SYCL compiler options to CUDA ptx64 ...")
-    list(APPEND TF_SYCL_OPTIONS -fsycl-targets=nvptx64-nvidia-cuda-sycldevice)
-  endif()
-endif()
 
 # additional features
 #add_library(features_settings INTERFACE)
@@ -230,11 +225,20 @@ endif()
 add_library(default_settings INTERFACE)
 add_library(tf::default_settings ALIAS default_settings)
 target_link_libraries(
-  default_settings 
-  INTERFACE 
-  tf::error_settings 
-  #tf::optimize_settings 
-  #tf::features_settings
+  default_settings
+  INTERFACE
+  tf::error_settings
+  $<$<BOOL:${ATOMIC_LIBRARY}>:${ATOMIC_LIBRARY}>
+)
+
+# Use real std headers instead of doctest's own forward-declared stand-ins
+# (e.g. for std::tuple). Newer MSVC toolsets emit C5285 ("specializing this
+# standard library template is forbidden") on doctest's forward declarations,
+# which becomes a hard error under /WX. This sidesteps the issue entirely.
+target_compile_definitions(
+  default_settings
+  INTERFACE
+  DOCTEST_CONFIG_USE_STD_HEADERS
 )
 
 # -----------------------------------------------------------------------------
@@ -244,14 +248,18 @@ target_link_libraries(
 message(STATUS "PROJECT_NAME: " ${PROJECT_NAME})
 message(STATUS "CMAKE_HOST_SYSTEM: ${CMAKE_HOST_SYSTEM}")
 message(STATUS "CMAKE_BUILD_TYPE: " ${CMAKE_BUILD_TYPE})
+message(STATUS "CMAKE_SYSTEM: " ${CMAKE_SYSTEM})
+message(STATUS "CMAKE_SYSTEM_PROCESSOR: " ${CMAKE_SYSTEM_PROCESSOR})
 message(STATUS "CMAKE_CXX_COMPILER: " ${CMAKE_CXX_COMPILER})
 message(STATUS "CMAKE_CXX_COMPILER_ID: " ${CMAKE_CXX_COMPILER_ID})
 message(STATUS "CMAKE_CXX_COMPILER_VERSION: " ${CMAKE_CXX_COMPILER_VERSION})
 message(STATUS "CMAKE_CXX_FLAGS: " ${CMAKE_CXX_FLAGS})
+message(STATUS "CMAKE_CXX_STANDARD: " ${CMAKE_CXX_STANDARD})
 message(STATUS "CMAKE_CUDA_COMPILER: " ${CMAKE_CUDA_COMPILER})
 message(STATUS "CMAKE_CUDA_COMPILER_ID: " ${CMAKE_CUDA_COMPILER_ID})
 message(STATUS "CMAKE_CUDA_COMPILER_VERSION: " ${CMAKE_CUDA_COMPILER_VERSION})
 message(STATUS "CMAKE_CUDA_FLAGS: " ${CMAKE_CUDA_FLAGS})
+message(STATUS "CMAKE_CUDA_STANDARD: " ${CMAKE_CUDA_STANDARD})
 message(STATUS "CMAKE_MODULE_PATH: " ${CMAKE_MODULE_PATH})
 message(STATUS "CMAKE_CURRENT_SOURCE_DIR: " ${CMAKE_CURRENT_SOURCE_DIR})
 message(STATUS "CMAKE_CURRENT_BINARY_DIR: " ${CMAKE_CURRENT_BINARY_DIR})
@@ -263,12 +271,12 @@ message(STATUS "CMAKE_INSTALL_FULL_LIBDIR: " ${CMAKE_INSTALL_FULL_LIBDIR})
 message(STATUS "CMAKE_MODULE_PATH: " ${CMAKE_MODULE_PATH})
 message(STATUS "CMAKE_PREFIX_PATH: " ${CMAKE_PREFIX_PATH})
 message(STATUS "TF_BUILD_BENCHMARKS: " ${TF_BUILD_BENCHMARKS})
+message(STATUS "TF_BUILD_PROFILER: " ${TF_BUILD_PROFILER})
 message(STATUS "TF_BUILD_CUDA: " ${TF_BUILD_CUDA})
-message(STATUS "TF_BUILD_SYCL: " ${TF_BUILD_SYCL})
-message(STATUS "TF_BUILD_SYCL_BITCODE: " ${TF_BUILD_SYCL_BITCODE})
 message(STATUS "TF_BUILD_TESTS: " ${TF_BUILD_TESTS})
 message(STATUS "TF_BUILD_EXAMPLES: " ${TF_BUILD_EXAMPLES})
-message(STATUS "TF_BUILD_PROFILER: " ${TF_BUILD_PROFILER})
+message(STATUS "TF_BUILD_MODULES: " ${TF_BUILD_MODULES})
+message(STATUS "TF_ENABLE_TASK_PRIORITY: " ${TF_ENABLE_TASK_PRIORITY})
 message(STATUS "TF_UTEST_DIR: " ${TF_UTEST_DIR})
 message(STATUS "TF_EXAMPLE_DIR: " ${TF_EXAMPLE_DIR})
 message(STATUS "TF_BENCHMARK_DIR: " ${TF_BENCHMARK_DIR})
@@ -281,9 +289,6 @@ include_directories(${PROJECT_SOURCE_DIR})
 # must-have package include
 # -----------------------------------------------------------------------------
 
-# Enable test
-include(CTest)
-
 # Find pthread package
 find_package(Threads REQUIRED)
 
@@ -292,19 +297,21 @@ find_package(Threads REQUIRED)
 # -----------------------------------------------------------------------------
 
 add_library(${PROJECT_NAME} INTERFACE)
-target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_17)
-target_link_libraries(${PROJECT_NAME} INTERFACE Threads::Threads)
+add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+target_link_libraries(${PROJECT_NAME} INTERFACE ${ATOMIC_LIBRARY} Threads::Threads)
 target_include_directories(${PROJECT_NAME} INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include/> 
 )
+# When building with MSVC compiler disable warnings on variables padding changed
+# for taskflow/core/tsq.hpp and taskflow/utility/mpmc.hpp
+target_compile_options(${PROJECT_NAME} INTERFACE $<$<BOOL:${MSVC}>:/wd4324>)
 
-# -----------------------------------------------------------------------------
-# profiler program 
-# -----------------------------------------------------------------------------
-if(TF_BUILD_PROFILER)
-  add_subdirectory(tfprof/server)
-endif(TF_BUILD_PROFILER)
+# opt-in task priority scheduling; propagated to all consumers of the library so
+# that when disabled (default) there is zero priority-related overhead
+if(TF_ENABLE_TASK_PRIORITY)
+  target_compile_definitions(${PROJECT_NAME} INTERFACE TF_ENABLE_TASK_PRIORITY)
+endif()
 
 # -----------------------------------------------------------------------------
 # Example program 
@@ -314,11 +321,27 @@ if(TF_BUILD_EXAMPLES)
 endif(TF_BUILD_EXAMPLES)
 
 # -----------------------------------------------------------------------------
+# Build modules
+# -----------------------------------------------------------------------------
+if(TF_BUILD_MODULES)
+  add_subdirectory(modules)
+endif(TF_BUILD_MODULES)
+
+# -----------------------------------------------------------------------------
 # Unittest
 # -----------------------------------------------------------------------------
 if(TF_BUILD_TESTS)
+  include(CTest)
   add_subdirectory(unittests)
 endif(TF_BUILD_TESTS)
+
+# -----------------------------------------------------------------------------
+# Profiler
+# -----------------------------------------------------------------------------
+
+if(TF_BUILD_PROFILER)
+  add_subdirectory(tfprof/server)
+endif(TF_BUILD_PROFILER)
 
 # -----------------------------------------------------------------------------
 # Benchmarking
@@ -349,7 +372,7 @@ install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}Targets)
 install(
   EXPORT ${PROJECT_NAME}Targets 
   NAMESPACE ${PROJECT_NAME}:: 
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/cmake/${PROJECT_NAME}
 )
 
 # set up config
@@ -358,18 +381,28 @@ include(CMakePackageConfigHelpers)
 configure_package_config_file(
   ${PROJECT_NAME}Config.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+  INSTALL_DESTINATION ${CMAKE_INSTALL_DATADIR}/cmake/${PROJECT_NAME}
   PATH_VARS CMAKE_INSTALL_FULL_INCLUDEDIR
 )
 
 write_basic_package_version_file(
   ${PROJECT_NAME}ConfigVersion.cmake 
-  COMPATIBILITY SameMajorVersion
+  COMPATIBILITY SameMinorVersion
+  ARCH_INDEPENDENT
 )
 
 install(
   FILES ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/cmake/${PROJECT_NAME}
 )
 
+# -----------------------------------------------------------------------------
+# pkg-config
+# -----------------------------------------------------------------------------
+
+configure_file(taskflow.pc.in taskflow.pc @ONLY)
+install(
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/taskflow.pc
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/pkgconfig
+)

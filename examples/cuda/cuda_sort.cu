@@ -1,6 +1,7 @@
 // This program demonstrates how to perform parallel sort with CUDA.
 
-#include <taskflow/cudaflow.hpp>
+#include <taskflow/cuda/cudaflow.hpp>
+#include <taskflow/cuda/algorithm/sort.hpp>
 
 int main(int argc, char* argv[]) {
   
@@ -30,11 +31,11 @@ int main(int argc, char* argv[]) {
   auto p = tf::cudaDefaultExecutionPolicy{};
   
   auto beg = std::chrono::steady_clock::now();
-
+  tf::cudaStream s;
   auto bufsz = tf::cuda_sort_buffer_size<decltype(p), int>(N);
-  tf::cudaScopedDeviceMemory<std::byte> buf(bufsz);
+  std::vector<std::byte, tf::cudaDeviceAllocator<std::byte>> buf(bufsz);
   tf::cuda_sort(p, d_keys, d_keys+N, tf::cuda_less<int>{}, buf.data());
-  p.synchronize();
+  s.synchronize();
   auto end = std::chrono::steady_clock::now();
 
   std::cout << "GPU sort: " 

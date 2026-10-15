@@ -1,7 +1,10 @@
 #pragma once
 
+#include <filesystem>
+
 #include "cuda_memory.hpp"
 #include "cuda_stream.hpp"
+#include "cuda_meta.hpp"
 
 #include "../utility/traits.hpp"
 
@@ -14,7 +17,7 @@ namespace tf {
 /**
 @brief gets the memcpy node parameter of a copy task
 */
-template <typename T, 
+template <typename T,
   std::enable_if_t<!std::is_same_v<T, void>, void>* = nullptr
 >
 cudaMemcpy3DParms cuda_get_copy_parms(T* tgt, const T* src, size_t num) {
@@ -85,7 +88,7 @@ template <typename T, std::enable_if_t<
   is_pod_v<T> && (sizeof(T)==1 || sizeof(T)==2 || sizeof(T)==4), void>* = nullptr
 >
 cudaMemsetParams cuda_get_fill_parms(T* dst, T value, size_t count) {
-  
+
   cudaMemsetParams p;
   p.dst = dst;
 
@@ -124,44 +127,100 @@ cudaMemsetParams cuda_get_zero_parms(T* dst, size_t count) {
 /**
 @brief queries the number of root nodes in a native CUDA graph
 */
-inline size_t cuda_get_graph_num_root_nodes(cudaGraph_t graph) {
+inline size_t cuda_graph_get_num_root_nodes(cudaGraph_t graph) {
   size_t num_nodes;
   TF_CHECK_CUDA(
-    cudaGraphGetRootNodes(graph, nullptr, &num_nodes), 
+    cudaGraphGetRootNodes(graph, nullptr, &num_nodes),
     "failed to get native graph root nodes"
   );
-  return num_nodes; 
+  return num_nodes;
 }
 
 /**
 @brief queries the number of nodes in a native CUDA graph
 */
-inline size_t cuda_get_graph_num_nodes(cudaGraph_t graph) {
+inline size_t cuda_graph_get_num_nodes(cudaGraph_t graph) {
   size_t num_nodes;
   TF_CHECK_CUDA(
-    cudaGraphGetNodes(graph, nullptr, &num_nodes), 
+    cudaGraphGetNodes(graph, nullptr, &num_nodes),
     "failed to get native graph nodes"
   );
-  return num_nodes; 
+  return num_nodes;
 }
 
 /**
-@brief queries the number of edges in a native CUDA graph
-*/
-inline size_t cuda_get_graph_num_edges(cudaGraph_t graph) {
+@brief Handles compatibility with CUDA <= 12.x and CUDA == 13.x
+ */
+inline size_t cuda_graph_get_num_edges(cudaGraph_t graph, cudaGraphNode_t* from, cudaGraphNode_t* to) {
   size_t num_edges;
   TF_CHECK_CUDA(
-    cudaGraphGetEdges(graph, nullptr, nullptr, &num_edges), 
-    "failed to get native graph edges"
+      TF_CUDA_PRE13(cudaGraphGetEdges(graph, from, to, &num_edges))
+      TF_CUDA_POST13(cudaGraphGetEdges(graph, from, to, nullptr, &num_edges)),
+      "failed to get native graph edges"
   );
   return num_edges;
 }
 
 /**
+@brief Handles compatibility with CUDA <= 12.x and CUDA 13
+* @param node
+* @param dependencies
+* @return
+ */
+inline size_t cuda_graph_node_get_dependencies(cudaGraphNode_t node, cudaGraphNode_t* dependencies) {
+  size_t num_predecessors;
+  TF_CHECK_CUDA(
+      TF_CUDA_PRE13(cudaGraphNodeGetDependencies(node, dependencies, &num_predecessors))
+      TF_CUDA_POST13(cudaGraphNodeGetDependencies(node, dependencies, nullptr, &num_predecessors)),
+  "Failed to get number of dependencies");
+  return num_predecessors;
+}
+
+/**
+@brief Handles compatibility with CUDA <= 12.x and CUDA 13
+@param node
+@param dependent_nodes
+@return
+ */
+inline size_t cuda_graph_node_get_dependent_nodes(cudaGraphNode_t node, cudaGraphNode_t *dependent_nodes) {
+  size_t num_successors;
+  TF_CHECK_CUDA(
+      TF_CUDA_PRE13(cudaGraphNodeGetDependentNodes(node, dependent_nodes, &num_successors))
+      TF_CUDA_POST13(cudaGraphNodeGetDependentNodes(node, dependent_nodes, nullptr, &num_successors)),
+      "Failed to get CUDA dependent nodes");
+  return num_successors;
+}
+
+/**
+@brief Handles compatibility with CUDA <= 12.x and CUDA 13
+@param graph
+@param from
+@param to
+@param numDependencies
+ */
+inline void cuda_graph_add_dependencies(
+  cudaGraph_t graph, const cudaGraphNode_t *from, const cudaGraphNode_t *to, size_t numDependencies) {
+  TF_CHECK_CUDA(
+    TF_CUDA_PRE13(cudaGraphAddDependencies(graph, from, to, numDependencies))
+    TF_CUDA_POST13(cudaGraphAddDependencies(graph, from, to, nullptr, numDependencies)),
+    "Failed to add CUDA graph node dependencies"
+  );
+}
+
+/**
+@brief queries the number of edges in a native CUDA graph
+*/
+inline size_t cuda_graph_get_num_edges(cudaGraph_t graph) {
+  return cuda_graph_get_num_edges(graph, nullptr, nullptr);
+}
+
+
+
+/**
 @brief acquires the nodes in a native CUDA graph
 */
-inline std::vector<cudaGraphNode_t> cuda_get_graph_nodes(cudaGraph_t graph) {
-  size_t num_nodes = cuda_get_graph_num_nodes(graph);
+inline std::vector<cudaGraphNode_t> cuda_graph_get_nodes(cudaGraph_t graph) {
+  size_t num_nodes = cuda_graph_get_num_nodes(graph);
   std::vector<cudaGraphNode_t> nodes(num_nodes);
   TF_CHECK_CUDA(
     cudaGraphGetNodes(graph, nodes.data(), &num_nodes),
@@ -173,8 +232,8 @@ inline std::vector<cudaGraphNode_t> cuda_get_graph_nodes(cudaGraph_t graph) {
 /**
 @brief acquires the root nodes in a native CUDA graph
 */
-inline std::vector<cudaGraphNode_t> cuda_get_graph_root_nodes(cudaGraph_t graph) {
-  size_t num_nodes = cuda_get_graph_num_root_nodes(graph);
+inline std::vector<cudaGraphNode_t> cuda_graph_get_root_nodes(cudaGraph_t graph) {
+  size_t num_nodes = cuda_graph_get_num_root_nodes(graph);
   std::vector<cudaGraphNode_t> nodes(num_nodes);
   TF_CHECK_CUDA(
     cudaGraphGetRootNodes(graph, nodes.data(), &num_nodes),
@@ -187,13 +246,10 @@ inline std::vector<cudaGraphNode_t> cuda_get_graph_root_nodes(cudaGraph_t graph)
 @brief acquires the edges in a native CUDA graph
 */
 inline std::vector<std::pair<cudaGraphNode_t, cudaGraphNode_t>>
-cuda_get_graph_edges(cudaGraph_t graph) {
-  size_t num_edges = cuda_get_graph_num_edges(graph);
+cuda_graph_get_edges(cudaGraph_t graph) {
+  size_t num_edges = cuda_graph_get_num_edges(graph);
   std::vector<cudaGraphNode_t> froms(num_edges), tos(num_edges);
-  TF_CHECK_CUDA(
-    cudaGraphGetEdges(graph, froms.data(), tos.data(), &num_edges),
-    "failed to get native graph edges"
-  );
+  num_edges = cuda_graph_get_num_edges(graph, froms.data(), tos.data());
   std::vector<std::pair<cudaGraphNode_t, cudaGraphNode_t>> edges(num_edges);
   for(size_t i=0; i<num_edges; i++) {
     edges[i] = std::make_pair(froms[i], tos[i]);
@@ -222,507 +278,755 @@ inline cudaGraphNodeType cuda_get_graph_node_type(cudaGraphNode_t node) {
   return type;
 }
 
-/**
-@brief convert the type of a native CUDA graph node to a readable string
-*/
-inline const char* cuda_graph_node_type_to_string(cudaGraphNodeType type) {
-  switch(type) {
-    case cudaGraphNodeTypeKernel      : return "kernel";
-    case cudaGraphNodeTypeMemcpy      : return "memcpy";
-    case cudaGraphNodeTypeMemset      : return "memset";
-    case cudaGraphNodeTypeHost        : return "host";
-    case cudaGraphNodeTypeGraph       : return "graph";
-    case cudaGraphNodeTypeEmpty       : return "empty";
-    case cudaGraphNodeTypeWaitEvent   : return "event_wait";
-    case cudaGraphNodeTypeEventRecord : return "event_record";
-    default                           : return "undefined";
-  }
-}
+// ----------------------------------------------------------------------------
+// cudaTask Types
+// ----------------------------------------------------------------------------
 
 /**
-@brief dumps a native CUDA graph and all associated child graphs to a DOT format
-
-@tparam T output stream target
-@param os target output stream
-@param graph native CUDA graph
+@brief convert a cuda_task type to a human-readable string
 */
-template <typename T>
-void cuda_dump_graph(T& os, cudaGraph_t graph) {
-  
-  os << "digraph cudaGraph {\n";
-
-  std::stack<std::tuple<cudaGraph_t, cudaGraphNode_t, int>> stack;
-  stack.push(std::make_tuple(graph, nullptr, 1));
-
-  int pl = 0;
-
-  while(stack.empty() == false) {
-
-    auto [graph, parent, l] = stack.top();
-    stack.pop();
-
-    for(int i=0; i<pl-l+1; i++) {
-      os << "}\n";
-    }
-
-    os << "subgraph cluster_p" << graph << " {\n"
-       << "label=\"cudaGraph-L" << l << "\";\n"
-       << "color=\"purple\";\n";
-
-    auto nodes = cuda_get_graph_nodes(graph);
-    auto edges = cuda_get_graph_edges(graph);
-
-    for(auto& [from, to] : edges) {
-      os << 'p' << from << " -> " << 'p' << to << ";\n";
-    }
-  
-    for(auto& node : nodes) {
-      auto type = cuda_get_graph_node_type(node);
-      if(type == cudaGraphNodeTypeGraph) {
-
-        cudaGraph_t graph;
-        TF_CHECK_CUDA(cudaGraphChildGraphNodeGetGraph(node, &graph), "");
-        stack.push(std::make_tuple(graph, node, l+1));
-
-        os << 'p' << node << "["
-           << "shape=folder, style=filled, fontcolor=white, fillcolor=purple, "
-           << "label=\"cudaGraph-L" << l+1
-           << "\"];\n";
-      }
-      else {
-        os << 'p' << node << "[label=\"" 
-           << cuda_graph_node_type_to_string(type) 
-           << "\"];\n";
-      }
-    }
-
-    // precede to parent
-    if(parent != nullptr) {
-      std::unordered_set<cudaGraphNode_t> successors;
-      for(const auto& p : edges) {
-        successors.insert(p.first);
-      }
-      for(auto node : nodes) {
-        if(successors.find(node) == successors.end()) {
-          os << 'p' << node << " -> " << 'p' << parent << ";\n";
-        }
-      }
-    }
-    
-    // set the previous level
-    pl = l;
-  }
-
-  for(int i=0; i<=pl; i++) {
-    os << "}\n";
+constexpr const char* to_string(cudaGraphNodeType type) {
+  switch (type) {
+    case cudaGraphNodeTypeKernel:             return "Kernel";
+    case cudaGraphNodeTypeMemcpy:             return "Memcpy";
+    case cudaGraphNodeTypeMemset:             return "Memset";
+    case cudaGraphNodeTypeHost:               return "Host";
+    case cudaGraphNodeTypeGraph:              return "Graph";
+    case cudaGraphNodeTypeEmpty:              return "Empty";
+    case cudaGraphNodeTypeWaitEvent:          return "WaitEvent";
+    case cudaGraphNodeTypeEventRecord:        return "EventRecord";
+    case cudaGraphNodeTypeExtSemaphoreSignal: return "ExtSemaphoreSignal";
+    case cudaGraphNodeTypeExtSemaphoreWait:   return "ExtSemaphoreWait";
+    case cudaGraphNodeTypeMemAlloc:           return "MemAlloc";
+    case cudaGraphNodeTypeMemFree:            return "MemFree";
+    case cudaGraphNodeTypeConditional:        return "Conditional";
+    default:                                  return "undefined";
   }
 }
 
 // ----------------------------------------------------------------------------
-// cudaGraph class
+// cudaTask
 // ----------------------------------------------------------------------------
 
-// class: cudaGraph
-class cudaGraph : public CustomGraphBase {
+/**
+@class cudaTask
 
-  friend class cudaNode;
-  friend class cudaTask;
-  friend class cudaFlowCapturerBase;
-  friend class cudaFlowCapturer;
-  friend class cudaFlow;
-  friend class cudaCapturingBase;
-  friend class cudaSequentialCapturing;
-  friend class cudaLinearCapturing;
-  friend class cudaRoundRobinCapturing;
-  friend class Taskflow;
-  friend class Executor;
-  
-  constexpr static int OFFLOADED = 0x01;
-  constexpr static int CHANGED   = 0x02;
-  constexpr static int UPDATED   = 0x04;
-
-  public:
-    
-    cudaGraph() = default;
-    ~cudaGraph();
-
-    cudaGraph(const cudaGraph&) = delete;
-    cudaGraph(cudaGraph&&);
-    
-    cudaGraph& operator = (const cudaGraph&) = delete;
-    cudaGraph& operator = (cudaGraph&&);
-
-    template <typename... ArgsT>
-    cudaNode* emplace_back(ArgsT&&...);
-
-    bool empty() const;
-
-    void clear();
-    void dump(std::ostream&, const void*, const std::string&) const override final;
-
-  private:
-
-    int _state{CHANGED};
-
-    cudaGraph_t _native_handle {nullptr};
-
-    std::vector<std::unique_ptr<cudaNode>> _nodes;
-    //std::vector<cudaNode*> _nodes;
-};
-
-// ----------------------------------------------------------------------------
-// cudaNode class
-// ----------------------------------------------------------------------------
-
-/** 
-@private
-@class: cudaNode
+@brief class to create a task handle of a CUDA %Graph node
 */
-class cudaNode {
-  
+class cudaTask {
+
   friend class cudaGraph;
-  friend class cudaTask;
+  friend class cudaGraphExec;
+
   friend class cudaFlow;
   friend class cudaFlowCapturer;
   friend class cudaFlowCapturerBase;
-  friend class cudaCapturingBase;
-  friend class cudaSequentialCapturing;
-  friend class cudaLinearCapturing;
-  friend class cudaRoundRobinCapturing;
-  friend class Taskflow;
-  friend class Executor;
-  
-  // Empty handle
-  struct Empty {
-  };
 
-  // Host handle
-  struct Host {
-
-    template <typename C>
-    Host(C&&);
-
-    std::function<void()> func;
-    
-    static void callback(void*);
-  };
-
-  // Memset handle
-  struct Memset {
-  };
-
-  // Memcpy handle
-  struct Memcpy {
-  };
-  
-  // Kernel handle
-  struct Kernel {
-    
-    template <typename F>
-    Kernel(F&& f);
-    
-    void* func {nullptr};
-  };
-
-  // Subflow handle
-  struct Subflow {
-    cudaGraph graph;
-  };
-
-  // Capture
-  struct Capture {
-    
-    template <typename C>
-    Capture(C&&);
-
-    std::function<void(cudaStream_t)> work;
-
-    cudaEvent_t event;
-    size_t level;
-    size_t lid;
-    size_t idx;
-  };
-
-  using handle_t = std::variant<
-    Empty, 
-    Host,
-    Memset, 
-    Memcpy, 
-    Kernel,
-    Subflow,
-    Capture
-  >;
+  friend std::ostream& operator << (std::ostream&, const cudaTask&);
 
   public:
-  
-  // variant index
-  constexpr static auto EMPTY   = get_index_v<Empty, handle_t>;
-  constexpr static auto HOST    = get_index_v<Host, handle_t>;
-  constexpr static auto MEMSET  = get_index_v<Memset, handle_t>;
-  constexpr static auto MEMCPY  = get_index_v<Memcpy, handle_t>; 
-  constexpr static auto KERNEL  = get_index_v<Kernel, handle_t>;
-  constexpr static auto SUBFLOW = get_index_v<Subflow, handle_t>;
-  constexpr static auto CAPTURE = get_index_v<Capture, handle_t>;
 
-    cudaNode() = delete;
-    
-    template <typename... ArgsT>
-    cudaNode(cudaGraph&, ArgsT&&...);
+    /**
+    @brief constructs an empty cudaTask
+    */
+    cudaTask() = default;
+
+    /**
+    @brief copy-constructs a cudaTask
+    */
+    cudaTask(const cudaTask&) = default;
+
+    /**
+    @brief copy-assigns a cudaTask
+    */
+    cudaTask& operator = (const cudaTask&) = default;
+
+    /**
+    @brief adds precedence links from this to other tasks
+
+    @tparam Ts parameter pack
+
+    @param tasks one or multiple tasks
+
+    @return @c *this
+    */
+    template <typename... Ts>
+    cudaTask& precede(Ts&&... tasks);
+
+    /**
+    @brief adds precedence links from other tasks to this
+
+    @tparam Ts parameter pack
+
+    @param tasks one or multiple tasks
+
+    @return @c *this
+    */
+    template <typename... Ts>
+    cudaTask& succeed(Ts&&... tasks);
+
+    /**
+    @brief queries the number of successors
+    */
+    size_t num_successors() const;
+
+    /**
+    @brief queries the number of dependents
+    */
+    size_t num_predecessors() const;
+
+    /**
+    @brief queries the type of this task
+    */
+    auto type() const;
+
+    /**
+    @brief dumps the task through an output stream
+
+    @param os an output stream target
+    */
+    void dump(std::ostream& os) const;
 
   private:
+
+    cudaTask(cudaGraph_t, cudaGraphNode_t);
     
-    cudaGraph& _graph;
-
-    std::string _name;
-    
-    handle_t _handle;
-
-    cudaGraphNode_t _native_handle {nullptr};
-
-    SmallVector<cudaNode*> _successors;
-    SmallVector<cudaNode*> _dependents;
-
-    void _precede(cudaNode*);
+    cudaGraph_t _native_graph {nullptr};
+    cudaGraphNode_t _native_node {nullptr};
 };
-
-// ----------------------------------------------------------------------------
-// cudaNode definitions
-// ----------------------------------------------------------------------------
-
-// Host handle constructor
-template <typename C>
-cudaNode::Host::Host(C&& c) : func {std::forward<C>(c)} {
-}
-
-// Host callback    
-inline void cudaNode::Host::callback(void* data) { 
-  static_cast<Host*>(data)->func(); 
-};
-
-// Kernel handle constructor
-template <typename F>
-cudaNode::Kernel::Kernel(F&& f) : 
-  func {std::forward<F>(f)} {
-}
-
-// Capture handle constructor
-template <typename C>
-cudaNode::Capture::Capture(C&& work) : 
-  work {std::forward<C>(work)} {
-}
 
 // Constructor
-template <typename... ArgsT>
-cudaNode::cudaNode(cudaGraph& graph, ArgsT&&... args) : 
-  _graph {graph},
-  _handle {std::forward<ArgsT>(args)...} {
+inline cudaTask::cudaTask(cudaGraph_t native_graph, cudaGraphNode_t native_node) : 
+  _native_graph {native_graph}, _native_node  {native_node} {
+}
+  
+// Function: precede
+template <typename... Ts>
+cudaTask& cudaTask::precede(Ts&&... tasks) {
+  (
+    cuda_graph_add_dependencies(
+      _native_graph, &_native_node, &(tasks._native_node), 1
+    ), ...
+  );
+  return *this;
 }
 
-// Procedure: _precede
-inline void cudaNode::_precede(cudaNode* v) {
+// Function: succeed
+template <typename... Ts>
+cudaTask& cudaTask::succeed(Ts&&... tasks) {
+  (tasks.precede(*this), ...);
+  return *this;
+}
 
-  _graph._state |= cudaGraph::CHANGED;
+// Function: num_predecessors
+inline size_t cudaTask::num_predecessors() const {
+  return cuda_graph_node_get_dependencies(_native_node, nullptr);
+}
 
-  _successors.push_back(v);
-  v->_dependents.push_back(this);
+// Function: num_successors
+inline size_t cudaTask::num_successors() const {
+  return cuda_graph_node_get_dependent_nodes(_native_node, nullptr);
+}
 
-  // capture node doesn't have the native graph yet
-  if(_handle.index() != cudaNode::CAPTURE) {
-    TF_CHECK_CUDA(
-      cudaGraphAddDependencies(
-        _graph._native_handle, &_native_handle, &v->_native_handle, 1
-      ),
-      "failed to add a preceding link ", this, "->", v
-    );
+// Function: type
+inline auto cudaTask::type() const {
+  cudaGraphNodeType type;
+  cudaGraphNodeGetType(_native_node, &type);
+  return type;
+}
+
+// Function: dump
+inline void cudaTask::dump(std::ostream& os) const {
+  os << "cudaTask [type=" << to_string(type()) << ']';
+}
+
+/**
+@brief overload of ostream inserter operator for cudaTask
+*/
+inline std::ostream& operator << (std::ostream& os, const cudaTask& ct) {
+  ct.dump(os);
+  return os;
+}
+
+// ----------------------------------------------------------------------------
+// cudaGraph
+// ----------------------------------------------------------------------------
+
+/**
+@class cudaGraph
+
+@brief class to create a CUDA graph with unique ownership
+
+This class wraps a `cudaGraph_t` handle with `std::unique_ptr` to ensure proper
+resource management and automatic cleanup.
+The graph is created by `cudaGraphCreate` and destroyed by `cudaGraphDestroy`.
+*/
+class cudaGraph : public std::unique_ptr<
+  std::remove_pointer_t<cudaGraph_t>,
+  cudaProxyDeleter<cudaGraphDestroy>
+> {
+
+  public:
+
+  /**
+  @brief constructs a new graph using `cudaGraphCreate`
+  */
+  cudaGraph() : unique_ptr([](){
+    cudaGraph_t graph;
+    TF_CHECK_CUDA(cudaGraphCreate(&graph, 0), "failed to create a CUDA native graph");
+    return graph;
+  }()) {
   }
-}
-    
-//// Procedure: _set_state
-//inline void cudaNode::_set_state(int flag) { 
-//  _state |= flag; 
-//}
-//
-//// Procedure: _unset_state
-//inline void cudaNode::_unset_state(int flag) { 
-//  _state &= ~flag; 
-//}
-//
-//// Procedure: _clear_state
-//inline void cudaNode::_clear_state() { 
-//  _state = 0; 
-//}
-//
-//// Function: _has_state
-//inline bool cudaNode::_has_state(int flag) const {
-//  return _state & flag;
-//}
 
-// ----------------------------------------------------------------------------
-// cudaGraph definitions
-// ----------------------------------------------------------------------------
+  /**
+  @brief constructs a graph that takes ownership of the given `cudaGraph_t`
+  */
+  explicit cudaGraph(cudaGraph_t graph) : unique_ptr(graph) {
+  }
 
-// Destructor
-inline cudaGraph::~cudaGraph() {
-  //clear();
-  assert(_native_handle == nullptr);
-}
+  /**
+  @brief implicitly converts to the managed `cudaGraph_t`
+  */
+  operator cudaGraph_t () const noexcept { return get(); }
 
-// Move constructor
-inline cudaGraph::cudaGraph(cudaGraph&& g) :
-  _native_handle {g._native_handle},
-  _nodes         {std::move(g._nodes)} {
+  /**
+  @brief queries the number of nodes in a native CUDA graph
+  */
+  size_t num_nodes() const;
   
-  g._native_handle = nullptr;
+  /**
+  @brief queries the number of edges in a native CUDA graph
+  */
+  size_t num_edges() const;
 
-  assert(g._nodes.empty());
-}
+  /**
+  @brief queries if the graph is empty
+  */
+  bool empty() const;
 
-// Move assignment
-inline cudaGraph& cudaGraph::operator = (cudaGraph&& rhs) {
-
-  //clear();
+  /**
+  @brief dumps the CUDA graph to a DOT format through the given output stream
   
-  // lhs
-  _native_handle = rhs._native_handle;
-  _nodes = std::move(rhs._nodes);
+  @param os target output stream
+  */
+  void dump(std::ostream& os);
 
-  assert(rhs._nodes.empty());
+  // ------------------------------------------------------------------------
+  // Graph building routines
+  // ------------------------------------------------------------------------
 
-  // rhs
-  rhs._native_handle = nullptr;
+  /**
+  @brief creates a no-operation task
 
-  return *this; 
+  @return a tf::cudaTask handle
+
+  An empty node performs no operation during execution,
+  but can be used for transitive ordering.
+  For example, a phased execution graph with 2 groups of @c n nodes
+  with a barrier between them can be represented using an empty node
+  and @c 2*n dependency edges,
+  rather than no empty node and @c n^2 dependency edges.
+  */
+  cudaTask noop();
+
+  /**
+  @brief creates a host task that runs a callable on the host
+
+  @tparam C callable type
+
+  @param callable a callable object with neither arguments nor return
+  (i.e., constructible from @c std::function<void()>)
+  @param user_data a pointer to the user data
+
+  @return a tf::cudaTask handle
+
+  A host task can only execute CPU-specific functions and cannot do any CUDA calls
+  (e.g., @c cudaMalloc).
+  */
+  template <typename C>
+  cudaTask host(C&& callable, void* user_data);
+
+  /**
+  @brief creates a kernel task
+
+  @tparam F kernel function type
+  @tparam ArgsT kernel function parameters type
+
+  @param g configured grid
+  @param b configured block
+  @param s configured shared memory size in bytes
+  @param f kernel function
+  @param args arguments to forward to the kernel function by copy
+
+  @return a tf::cudaTask handle
+  */
+  template <typename F, typename... ArgsT>
+  cudaTask kernel(dim3 g, dim3 b, size_t s, F f, ArgsT... args);
+
+  /**
+  @brief creates a memset task that fills untyped data with a byte value
+
+  @param dst pointer to the destination device memory area
+  @param v value to set for each byte of specified memory
+  @param count size in bytes to set
+
+  @return a tf::cudaTask handle
+
+  A memset task fills the first @c count bytes of device memory area
+  pointed by @c dst with the byte value @c v.
+  */
+  cudaTask memset(void* dst, int v, size_t count);
+
+  /**
+  @brief creates a memcpy task that copies untyped data in bytes
+
+  @param tgt pointer to the target memory block
+  @param src pointer to the source memory block
+  @param bytes bytes to copy
+
+  @return a tf::cudaTask handle
+
+  A memcpy task transfers @c bytes of data from a source location
+  to a target location. Direction can be arbitrary among CPUs and GPUs.
+  */
+  cudaTask memcpy(void* tgt, const void* src, size_t bytes);
+
+  /**
+  @brief creates a memset task that sets a typed memory block to zero
+
+  @tparam T element type (size of @c T must be either 1, 2, or 4)
+  @param dst pointer to the destination device memory area
+  @param count number of elements
+
+  @return a tf::cudaTask handle
+
+  A zero task zeroes the first @c count elements of type @c T
+  in a device memory area pointed by @c dst.
+  */
+  template <typename T, std::enable_if_t<
+    is_pod_v<T> && (sizeof(T)==1 || sizeof(T)==2 || sizeof(T)==4), void>* = nullptr
+  >
+  cudaTask zero(T* dst, size_t count);
+
+  /**
+  @brief creates a memset task that fills a typed memory block with a value
+
+  @tparam T element type (size of @c T must be either 1, 2, or 4)
+
+  @param dst pointer to the destination device memory area
+  @param value value to fill for each element of type @c T
+  @param count number of elements
+
+  @return a tf::cudaTask handle
+
+  A fill task fills the first @c count elements of type @c T with @c value
+  in a device memory area pointed by @c dst.
+  The value to fill is interpreted in type @c T rather than byte.
+  */
+  template <typename T, std::enable_if_t<
+    is_pod_v<T> && (sizeof(T)==1 || sizeof(T)==2 || sizeof(T)==4), void>* = nullptr
+  >
+  cudaTask fill(T* dst, T value, size_t count);
+
+  /**
+  @brief creates a memcopy task that copies typed data
+
+  @tparam T element type (non-void)
+
+  @param tgt pointer to the target memory block
+  @param src pointer to the source memory block
+  @param num number of elements to copy
+
+  @return a tf::cudaTask handle
+
+  A copy task transfers <tt>num*sizeof(T)</tt> bytes of data from a source location
+  to a target location. Direction can be arbitrary among CPUs and GPUs.
+  */
+  template <typename T,
+    std::enable_if_t<!std::is_same_v<T, void>, void>* = nullptr
+  >
+  cudaTask copy(T* tgt, const T* src, size_t num);
+  
+  // ------------------------------------------------------------------------
+  // generic algorithms
+  // ------------------------------------------------------------------------
+
+  /**
+  @brief runs a callable with only a single kernel thread
+
+  @tparam C callable type
+
+  @param c callable to run by a single kernel thread
+
+  @return a tf::cudaTask handle
+  */
+  template <typename C>
+  cudaTask single_task(C c);
+  
+  /**
+  @brief applies a callable to each dereferenced element of the data array
+
+  @tparam I iterator type
+  @tparam C callable type
+  @tparam E execution poligy (default tf::cudaDefaultExecutionPolicy)
+
+  @param first iterator to the beginning (inclusive)
+  @param last iterator to the end (exclusive)
+  @param callable a callable object to apply to the dereferenced iterator
+
+  @return a tf::cudaTask handle
+
+  This method is equivalent to the parallel execution of the following loop on a GPU:
+
+  @code{.cpp}
+  for(auto itr = first; itr != last; itr++) {
+    callable(*itr);
+  }
+  @endcode
+  */
+  template <typename E = cudaDefaultExecutionPolicy, typename I, typename C>
+  cudaTask for_each(I first, I last, C callable);
+  
+  /**
+  @brief applies a callable to each index in the range with the step size
+
+  @tparam I index type
+  @tparam C callable type
+  @tparam E execution poligy (default tf::cudaDefaultExecutionPolicy)
+
+  @param first beginning index
+  @param last last index
+  @param step step size
+  @param callable the callable to apply to each element in the data array
+
+  @return a tf::cudaTask handle
+
+  This method is equivalent to the parallel execution of the following loop on a GPU:
+
+  @code{.cpp}
+  // step is positive [first, last)
+  for(auto i=first; i<last; i+=step) {
+    callable(i);
+  }
+
+  // step is negative [first, last)
+  for(auto i=first; i>last; i+=step) {
+    callable(i);
+  }
+  @endcode
+  */
+  template <typename E = cudaDefaultExecutionPolicy, typename I, typename C>
+  cudaTask for_each_index(I first, I last, I step, C callable);
+  
+  /**
+  @brief applies a callable to a source range and stores the result in a target range
+
+  @tparam I input iterator type
+  @tparam O output iterator type
+  @tparam C unary operator type
+  @tparam E execution poligy (default tf::cudaDefaultExecutionPolicy)
+
+  @param first iterator to the beginning of the input range
+  @param last iterator to the end of the input range
+  @param output iterator to the beginning of the output range
+  @param op the operator to apply to transform each element in the range
+
+  @return a tf::cudaTask handle
+
+  This method is equivalent to the parallel execution of the following loop on a GPU:
+
+  @code{.cpp}
+  while (first != last) {
+    *output++ = callable(*first++);
+  }
+  @endcode
+  */
+  template <typename E = cudaDefaultExecutionPolicy, typename I, typename O, typename C>
+  cudaTask transform(I first, I last, O output, C op);
+  
+  /**
+  @brief creates a task to perform parallel transforms over two ranges of items
+
+  @tparam I1 first input iterator type
+  @tparam I2 second input iterator type
+  @tparam O output iterator type
+  @tparam C unary operator type
+  @tparam E execution poligy (default tf::cudaDefaultExecutionPolicy)
+
+  @param first1 iterator to the beginning of the input range
+  @param last1 iterator to the end of the input range
+  @param first2 iterato
+  @param output iterator to the beginning of the output range
+  @param op binary operator to apply to transform each pair of items in the
+            two input ranges
+
+  @return cudaTask handle
+
+  This method is equivalent to the parallel execution of the following loop on a GPU:
+
+  @code{.cpp}
+  while (first1 != last1) {
+    *output++ = op(*first1++, *first2++);
+  }
+  @endcode
+  */
+  template <typename E = cudaDefaultExecutionPolicy, typename I1, typename I2, typename O, typename C>
+  cudaTask transform(I1 first1, I1 last1, I2 first2, O output, C op);
+};
+
+// query the number of nodes
+inline size_t cudaGraph::num_nodes() const {
+  size_t n;
+  TF_CHECK_CUDA(
+    cudaGraphGetNodes(this->get(), nullptr, &n),
+    "failed to get native graph nodes"
+  );
+  return n;
 }
 
-// Function: empty
+// query the emptiness
 inline bool cudaGraph::empty() const {
-  return _nodes.empty();
+  return num_nodes() == 0;
 }
 
-// Procedure: clear
-inline void cudaGraph::clear() {
-  //for(auto n : _nodes) {
-  //  delete n;
-  //}
-  _state = cudaGraph::CHANGED;
-  _nodes.clear();
+// query the number of edges
+inline size_t cudaGraph::num_edges() const {
+  return cuda_graph_get_num_edges(this->get());
 }
 
-// Function: emplace_back
-template <typename... ArgsT>
-cudaNode* cudaGraph::emplace_back(ArgsT&&... args) {
+//// dump the graph
+//inline void cudaGraph::dump(std::ostream& os) {
+//  
+//  // acquire the native handle
+//  auto g = this->get();
+//
+//  os << "digraph cudaGraph {\n";
+//
+//  std::stack<std::tuple<cudaGraph_t, cudaGraphNode_t, int>> stack;
+//  stack.push(std::make_tuple(g, nullptr, 1));
+//
+//  int pl = 0;
+//
+//  while(stack.empty() == false) {
+//
+//    auto [graph, parent, l] = stack.top();
+//    stack.pop();
+//
+//    for(int i=0; i<pl-l+1; i++) {
+//      os << "}\n";
+//    }
+//
+//    os << "subgraph cluster_p" << graph << " {\n"
+//       << "label=\"cudaGraph-L" << l << "\";\n"
+//       << "color=\"purple\";\n";
+//
+//    auto nodes = cuda_graph_get_nodes(graph);
+//    auto edges = cuda_graph_get_edges(graph);
+//
+//    for(auto& [from, to] : edges) {
+//      os << 'p' << from << " -> " << 'p' << to << ";\n";
+//    }
+//
+//    for(auto& node : nodes) {
+//      auto type = cuda_get_graph_node_type(node);
+//      if(type == cudaGraphNodeTypeGraph) {
+//
+//        cudaGraph_t child_graph;
+//        TF_CHECK_CUDA(cudaGraphChildGraphNodeGetGraph(node, &child_graph), "");
+//        stack.push(std::make_tuple(child_graph, node, l+1));
+//
+//        os << 'p' << node << "["
+//           << "shape=folder, style=filled, fontcolor=white, fillcolor=purple, "
+//           << "label=\"cudaGraph-L" << l+1
+//           << "\"];\n";
+//      }
+//      else {
+//        os << 'p' << node << "[label=\""
+//           << to_string(type)
+//           << "\"];\n";
+//      }
+//    }
+//
+//    // precede to parent
+//    if(parent != nullptr) {
+//      std::unordered_set<cudaGraphNode_t> successors;
+//      for(const auto& p : edges) {
+//        successors.insert(p.first);
+//      }
+//      for(auto node : nodes) {
+//        if(successors.find(node) == successors.end()) {
+//          os << 'p' << node << " -> " << 'p' << parent << ";\n";
+//        }
+//      }
+//    }
+//
+//    // set the previous level
+//    pl = l;
+//  }
+//
+//  for(int i=0; i<=pl; i++) {
+//    os << "}\n";
+//  }
+//}
 
-  _state |= cudaGraph::CHANGED;
+// dump the graph
+inline void cudaGraph::dump(std::ostream& os) {
 
-  auto node = std::make_unique<cudaNode>(std::forward<ArgsT>(args)...);
-  _nodes.emplace_back(std::move(node));
-  return _nodes.back().get();
+  // Generate a unique temporary filename in the system's temp directory using filesystem
+  auto temp_path = std::filesystem::temp_directory_path() / "graph_";
+  std::random_device rd;
+  std::uniform_int_distribution<int> dist(100000, 999999); // Generates a random number
+  temp_path += std::to_string(dist(rd)) + ".dot";
 
-  // TODO: use object pool to save memory
-  //auto node = new cudaNode(std::forward<ArgsT>(args)...);
-  //_nodes.push_back(node);
-  //return node;
-}
+  // Call the original function with the temporary file
+  TF_CHECK_CUDA(cudaGraphDebugDotPrint(this->get(), temp_path.string().c_str(), 0), "");
 
-// Procedure: dump the graph to a DOT format
-inline void cudaGraph::dump(
-  std::ostream& os, const void* root, const std::string& root_name
-) const {
-  
-  // recursive dump with stack
-  std::stack<std::tuple<const cudaGraph*, const cudaNode*, int>> stack;
-  stack.push(std::make_tuple(this, nullptr, 1));
-
-  int pl = 0;
-
-  while(!stack.empty()) {
-
-    auto [graph, parent, l] = stack.top();
-    stack.pop();
-
-    for(int i=0; i<pl-l+1; i++) {
-      os << "}\n";
-    }
-  
-    if(parent == nullptr) {
-      if(root) {
-        os << "subgraph cluster_p" << root << " {\nlabel=\"cudaFlow: ";
-        if(root_name.empty()) os << 'p' << root;
-        else os << root_name;
-        os << "\";\n" << "color=\"purple\"\n";
-      }
-      else {
-        os << "digraph cudaFlow {\n";
-      }
-    }
-    else {
-      os << "subgraph cluster_p" << parent << " {\nlabel=\"cudaSubflow: ";
-      if(parent->_name.empty()) os << 'p' << parent;
-      else os << parent->_name;
-      os << "\";\n" << "color=\"purple\"\n";
-    }
-
-    for(auto& node : graph->_nodes) {
-
-      auto v = node.get();
-      
-      os << 'p' << v << "[label=\"";
-      if(v->_name.empty()) {
-        os << 'p' << v << "\"";
-      }
-      else {
-        os << v->_name << "\"";
-      }
-          
-      switch(v->_handle.index()) {
-        case cudaNode::KERNEL:
-          os << " style=\"filled\""
-             << " color=\"white\" fillcolor=\"black\""
-             << " fontcolor=\"white\""
-             << " shape=\"box3d\"";
-        break;
-
-        case cudaNode::SUBFLOW:
-          stack.push(std::make_tuple(
-            &(std::get_if<cudaNode::Subflow>(&v->_handle)->graph), v, l+1)
-          );
-          os << " style=\"filled\""
-             << " color=\"black\" fillcolor=\"purple\""
-             << " fontcolor=\"white\""
-             << " shape=\"folder\"";
-        break;
-
-        default:
-        break;
-      }
-  
-      os << "];\n";
-
-      for(const auto s : v->_successors) {
-        os << 'p' << v << " -> " << 'p' << s << ";\n";
-      }
-      
-      if(v->_successors.size() == 0) {
-        if(parent == nullptr) {
-          if(root) {
-            os << 'p' << v << " -> p" << root << ";\n";
-          }
-        }
-        else {
-          os << 'p' << v << " -> p" << parent << ";\n";
-        }
-      }
-    }
-    
-    // set the previous level
-    pl = l;
+  // Read the file and write to the output stream
+  std::ifstream file(temp_path);
+  if (file) {
+    os << file.rdbuf();  // Copy file contents to the stream
+    file.close();
+    std::filesystem::remove(temp_path);  // Clean up the temporary file
+  } else {
+    TF_THROW("failed to open ", temp_path, " for dumping the CUDA graph");
   }
-
-  for(int i=0; i<pl; i++) {
-    os << "}\n";
-  }
-
 }
+
+// Function: noop
+inline cudaTask cudaGraph::noop() {
+
+  cudaGraphNode_t node;
+
+  TF_CHECK_CUDA(
+    cudaGraphAddEmptyNode(&node, this->get(), nullptr, 0),
+    "failed to create a no-operation (empty) node"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+// Function: host
+template <typename C>
+cudaTask cudaGraph::host(C&& callable, void* user_data) {
+
+  cudaGraphNode_t node;
+  cudaHostNodeParams p {callable, user_data};
+
+  TF_CHECK_CUDA(
+    cudaGraphAddHostNode(&node, this->get(), nullptr, 0, &p),
+    "failed to create a host node"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+// Function: kernel
+template <typename F, typename... ArgsT>
+cudaTask cudaGraph::kernel(
+  dim3 g, dim3 b, size_t s, F f, ArgsT... args
+) {
+
+  cudaGraphNode_t node;
+  cudaKernelNodeParams p;
+
+  void* arguments[sizeof...(ArgsT)] = { (void*)(&args)... };
+
+  p.func = (void*)f;
+  p.gridDim = g;
+  p.blockDim = b;
+  p.sharedMemBytes = s;
+  p.kernelParams = arguments;
+  p.extra = nullptr;
+
+  TF_CHECK_CUDA(
+    cudaGraphAddKernelNode(&node, this->get(), nullptr, 0, &p),
+    "failed to create a kernel task"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+// Function: zero
+template <typename T, std::enable_if_t<
+  is_pod_v<T> && (sizeof(T)==1 || sizeof(T)==2 || sizeof(T)==4), void>*
+>
+cudaTask cudaGraph::zero(T* dst, size_t count) {
+
+  cudaGraphNode_t node;
+  auto p = cuda_get_zero_parms(dst, count);
+
+  TF_CHECK_CUDA(
+    cudaGraphAddMemsetNode(&node, this->get(), nullptr, 0, &p),
+    "failed to create a memset (zero) task"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+// Function: fill
+template <typename T, std::enable_if_t<
+  is_pod_v<T> && (sizeof(T)==1 || sizeof(T)==2 || sizeof(T)==4), void>*
+>
+cudaTask cudaGraph::fill(T* dst, T value, size_t count) {
+
+  cudaGraphNode_t node;
+  auto p = cuda_get_fill_parms(dst, value, count);
+  TF_CHECK_CUDA(
+    cudaGraphAddMemsetNode(&node, this->get(), nullptr, 0, &p),
+    "failed to create a memset (fill) task"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+// Function: copy
+template <
+  typename T,
+  std::enable_if_t<!std::is_same_v<T, void>, void>*
+>
+cudaTask cudaGraph::copy(T* tgt, const T* src, size_t num) {
+
+  cudaGraphNode_t node;
+  auto p = cuda_get_copy_parms(tgt, src, num);
+
+  TF_CHECK_CUDA(
+    cudaGraphAddMemcpyNode(&node, this->get(), nullptr, 0, &p),
+    "failed to create a memcpy (copy) task"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+// Function: memset
+inline cudaTask cudaGraph::memset(void* dst, int ch, size_t count) {
+
+  cudaGraphNode_t node;
+  auto p = cuda_get_memset_parms(dst, ch, count);
+
+  TF_CHECK_CUDA(
+    cudaGraphAddMemsetNode(&node, this->get(), nullptr, 0, &p),
+    "failed to create a memset task"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+// Function: memcpy
+inline cudaTask cudaGraph::memcpy(void* tgt, const void* src, size_t bytes) {
+
+  cudaGraphNode_t node;
+  auto p = cuda_get_memcpy_parms(tgt, src, bytes);
+
+  TF_CHECK_CUDA(
+    cudaGraphAddMemcpyNode(&node, this->get(), nullptr, 0, &p),
+    "failed to create a memcpy task"
+  );
+
+  return cudaTask(this->get(), node);
+}
+
+
+
 
 
 }  // end of namespace tf -----------------------------------------------------

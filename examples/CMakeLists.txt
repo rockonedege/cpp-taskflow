@@ -1,35 +1,56 @@
 list(APPEND TF_EXAMPLES
   simple 
+  attach_data
   async
-  subflow_async
+  async_module
+  runtime_async
+  dependent_async
   observer 
   subflow 
   fibonacci 
   condition
   multi_condition
   switch_case
-  do_while
-  while
+  do_while_loop
+  while_loop
+  for_loop
   if_else
   nested_if_else
   visualization 
-  reduce 
   parallel_for 
   parallel_sort
+  parallel_reduce 
+  inclusive_scan
+  exclusive_scan
+  pipeline
+  scalable_pipeline
+  text_pipeline
+  taskflow_pipeline
+  parallel_graph_pipeline
+  parallel_data_pipeline
   run 
+  corun
+  runtime
   composition
   limited_concurrency
   cancel
-  cancel_async
-  pipeline
-  #pipeline_2
+  exception
+  subflow_exception
+  worker_interface
+  task_visitor
+  tsp
 )
 
 foreach(example IN LISTS TF_EXAMPLES)
   add_executable(${example} ${example}.cpp)
   target_link_libraries(
-    ${example} ${PROJECT_NAME} tf::default_settings
+    ${example} ${PROJECT_NAME} ${ATOMIC_LIBRARY} tf::default_settings
     )
+  # set emcc options
+  if (CMAKE_SYSTEM_NAME STREQUAL Emscripten)
+    target_link_options(${example} PUBLIC -sASSERTIONS=1 -sPROXY_TO_PTHREAD -sTOTAL_MEMORY=1536MB -sEXIT_RUNTIME=1 -sUSE_PTHREADS=1)
+    target_compile_options(${example} PUBLIC -matomics)
+  endif()
 endforeach()
 
 # -----------------------------------------------------------------------------
@@ -44,6 +65,13 @@ endif()
 # -----------------------------------------------------------------------------
 if(TF_BUILD_SYCL)
   add_subdirectory(sycl)
+endif()
+
+# -----------------------------------------------------------------------------
+# modules examples
+# -----------------------------------------------------------------------------
+if(TF_BUILD_MODULE)
+  add_subdirectory(modules)
 endif()
 
 
